@@ -1,0 +1,75 @@
+# Configuration file for Football AI Demo
+
+# API Keys
+api_keys:
+  huggingface_token: ""
+  roboflow_api_key: ""
+
+# Model Configuration
+models:
+  player_detection_model_id: "football-players-detection-3zvbc/11"
+  field_detection_model_id: "football-field-detection-f07vi/14"
+  siglip_model_path: "google/siglip-base-patch16-224"
+
+# Video Processing Settings
+video:
+  # Input video file - update with your video path
+  input_path: "/home/farshid/proj/Football/videos/08fd33_0.mp4"
+  # Output video file (optional)
+  output_path: "/home/farshid/proj/Football/videos/output_video.mp4"
+  # Frame stride for training team classifier
+  stride: 30
+  # FPS for display
+  display_fps: 30
+
+# Detection Settings
+detection:
+  confidence_threshold: 0.3
+  nms_threshold: 0.5
+  keypoint_confidence_threshold: 0.5
+
+# Tracking Settings
+tracking:
+  max_distance_threshold: 500
+  tracker_type: "bytetrack"
+
+# Display Settings
+display:
+  # Display backend: 'opencv' or 'matplotlib'
+  backend: "opencv"
+  # Window sizes
+  original_frame_width: 800
+  original_frame_height: 600
+  pitch_view_width: 600
+  pitch_view_height: 800
+  # Show or hide elements
+  show_tracking_ids: true
+  show_ball: true
+  show_voronoi: true
+  # Colors (in hex)
+  team_colors:
+    team_1: "#00BFFF"  # Light blue
+    team_2: "#FF1493"  # Deep pink
+  ball_color: "#FFD700"  # Gold
+  referee_color: "#FFD700"  # Gold
+  
+# Ball tracking settings
+ball_tracking:
+  enable: true
+  # Maximum length of trail
+  trail_length: 10
+  # Number of frames to average transformation matrix
+  avg_frames: 5
+
+# Performance Settings
+performance:
+  use_gpu: true
+  device: "cuda"  # or "cpu"
+  batch_size: 32
+
+# Caching Settings
+caching:
+  # Enable caching of trained team classifier
+  enable_team_classifier_cache: true
+  # Cache directory (leave empty to use same directory as video)
+  cache_directory: ""

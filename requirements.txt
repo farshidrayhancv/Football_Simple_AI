@@ -1,0 +1,24 @@
+# Core dependencies
+numpy>=1.24.0
+opencv-python>=4.8.0
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.35.0
+tqdm>=4.65.0
+pyyaml>=6.0
+matplotlib>=3.7.0
+umap-learn>=0.5.4
+scikit-learn>=1.3.0
+more-itertools>=9.0.0
+plotly>=5.14.0
+
+# Computer vision and ML
+supervision>=0.23.0
+inference-gpu>=0.9.17
+
+# Sports analytics
+sports @ git+https://github.com/roboflow/sports.git
+
+# Additional dependencies
+Pillow>=10.0.0
+pandas>=2.0.0
