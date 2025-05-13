@@ -1,0 +1,43 @@
+services:
+  football-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: football-ai-app
+    
+    # GPU support with nvidia runtime
+    runtime: nvidia
+    
+    # Interactive mode with tty
+    stdin_open: true
+    tty: true
+    
+    # Mount volumes
+    volumes:
+      # Mount current directory for code (maintains version control)
+      - .:/app
+      # Mount videos folder for input/output
+      - ./videos:/app/videos
+      # Mount output folder
+      - ./output:/app/output
+      # Mount cache folder for model caching
+      - ./.cache:/app/.cache
+      # X11 socket for GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    
+    # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DISPLAY=${DISPLAY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - CUDA_VISIBLE_DEVICES=0
+    
+    # Network mode for GUI support
+    network_mode: host
+    
+    # Working directory
+    working_dir: /app
+    
+    # Command to start with bash
+    command: /bin/bash

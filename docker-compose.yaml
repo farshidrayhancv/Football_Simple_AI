@@ -1,0 +1,40 @@
+# docker-compose.yaml
+version: '3.8'
+
+services:
+  football-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: football-ai-app
+    
+    # Interactive mode with tty
+    stdin_open: true
+    tty: true
+    
+    # Mount volumes
+    volumes:
+      # Mount current directory for code (maintains version control)
+      - .:/app
+      # Mount videos folder for input/output
+      - ./videos:/app/videos
+      # Mount output folder
+      - ./output:/app/output
+      # Mount cache folder for model caching
+      - ./.cache:/app/.cache
+      # X11 socket for GUI (if needed)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    
+    # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DISPLAY=${DISPLAY}
+    
+    # Network mode for GUI support
+    network_mode: host
+    
+    # Working directory
+    working_dir: /app
+    
+    # Command to start with bash
+    command: /bin/bash
