@@ -231,6 +231,6 @@ If you use this in research, please cite:
 @software{football_ai,
   title = {Football AI: Computer Vision System for Football Analysis},
   year = {2024},
-  url = {https://github.com/yourusername/football-ai}
+  url = {https://github.com/farshidrayhancv/football-ai}
 }
 ```
