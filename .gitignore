@@ -1,1 +1,8 @@
 videos/*
+caching/*
+.cache/
+
+*.mp4
+__pycache__
+
+config_temp.yaml
