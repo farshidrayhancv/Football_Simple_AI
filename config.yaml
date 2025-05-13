@@ -16,7 +16,7 @@ video:
   # Input video file - update with your video path
   input_path: "/home/farshid/proj/Football/videos/08fd33_0.mp4"
   # Output video file (optional)
-  output_path: "/home/farshid/proj/Football/videos/output_video.mp4"
+  output_path: "/home/farshid/proj/Football/Football_AI_2/preds/output_video.mp4"
   # Frame stride for training team classifier
   stride: 30
   # FPS for display

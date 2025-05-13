@@ -1,1 +1,7 @@
 videos/*
+caching/*
+.cache/
+
+*.mp4
+__pycache__
+.
