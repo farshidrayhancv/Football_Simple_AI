@@ -3,7 +3,7 @@
 
 # Football AI - Computer Vision System for Football Analysis
 
-A sophisticated computer vision system that analyzes football match videos to detect players, track ball movement, classify teams, and provide tactical visualizations.
+A simple computer vision system that analyzes football match videos to detect players, track ball movement, classify teams, and provide tactical visualizations.
 
 ## Features
 
