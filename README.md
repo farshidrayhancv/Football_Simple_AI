@@ -3,6 +3,12 @@
 
 A simple computer vision system that analyzes football match videos to detect players, track ball movement, classify teams, and provide tactical visualizations.
 
+## Preview
+
+![Football AI Preview](preview.jpg)
+
+
+
 ## Features
 
 - **Player Detection**: Identifies players, goalkeepers, and referees in real-time
