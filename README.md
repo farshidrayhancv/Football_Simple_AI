@@ -19,6 +19,7 @@ A simple computer vision system that analyzes football match videos to detect pl
 - **Team Classification**: Automatically classifies players into their respective teams
 - **Ball Tracking**: Tracks ball movement with trail visualization
 - **Field Detection**: Detects field keypoints for perspective transformation
+- **Pose Estimation**: Estimates player poses based on body parts
 - **Tactical View**: Creates top-down pitch view with player positions
 - **Caching System**: Caches trained models for faster processing
 - **Modular Architecture**: Clean, testable code structure
