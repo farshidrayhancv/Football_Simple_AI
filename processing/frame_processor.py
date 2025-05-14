@@ -1,4 +1,4 @@
-"""Frame processing module with pose estimation support."""
+"""Frame processing module with pose estimation and segmentation support."""
 
 import cv2
 import numpy as np
@@ -18,19 +18,21 @@ class FrameProcessor:
         self.team_resolver = TeamResolver()
         self.coordinate_transformer = CoordinateTransformer(config)
         
-        # Check if pose is enabled
+        # Check if pose and segmentation are enabled
         self.enable_pose = config.get('display', {}).get('show_pose', True)
+        self.enable_segmentation = config.get('display', {}).get('show_segmentation', True)
     
     def process_frame(self, frame):
-        """Process a single frame with pose estimation."""
-        # Use enhanced detector if pose is enabled
-        if self.enable_pose and hasattr(self.player_detector, 'detect_with_pose'):
-            result = self.player_detector.detect_categories(frame)
-            detections_dict, poses = self.player_detector.detect_with_pose(frame)
+        """Process a single frame with pose estimation and segmentation."""
+        # Use enhanced detector if enabled
+        if hasattr(self.player_detector, 'detect_with_pose_and_segmentation'):
+            detections_dict, poses, segmentations = self.player_detector.detect_with_pose_and_segmentation(frame)
         else:
+            # Fallback to basic detection
             result = self.player_detector.detect_categories(frame)
             detections_dict = result
             poses = None
+            segmentations = None
         
         all_detections = detections_dict['all']
         
@@ -76,12 +78,17 @@ class FrameProcessor:
             if len(pitch_ball_xy) > 0:
                 self.tracker.update_ball_trail(pitch_ball_xy[0])
         
-        # Calculate pose statistics if poses are available
+        # Calculate statistics
         pose_stats = None
+        seg_stats = None
+        
         if poses:
             pose_stats = self._calculate_pose_stats(poses)
         
-        return detections, transformer, poses, pose_stats
+        if segmentations:
+            seg_stats = self._calculate_segmentation_stats(segmentations)
+        
+        return detections, transformer, poses, pose_stats, segmentations, seg_stats
     
     def _assign_teams(self, frame, players):
         """Assign teams to players."""
@@ -131,5 +138,30 @@ class FrameProcessor:
         
         if all_confidences:
             stats['avg_confidence'] = f"{np.mean(all_confidences):.2f}"
+        
+        return stats
+    
+    def _calculate_segmentation_stats(self, segmentations):
+        """Calculate statistics from segmentation data."""
+        stats = {}
+        
+        # Count detected segmentations
+        player_segs_detected = sum(1 for s in segmentations.get('players', []) if s is not None)
+        goalkeeper_segs_detected = sum(1 for s in segmentations.get('goalkeepers', []) if s is not None)
+        
+        stats['player_segments'] = player_segs_detected
+        stats['goalkeeper_segments'] = goalkeeper_segs_detected
+        stats['total_segments'] = player_segs_detected + goalkeeper_segs_detected
+        
+        # Calculate average mask size if available
+        mask_sizes = []
+        for category in ['players', 'goalkeepers']:
+            if category in segmentations:
+                for mask in segmentations[category]:
+                    if mask is not None and isinstance(mask, np.ndarray):
+                        mask_sizes.append(np.sum(mask > 0.5))
+        
+        if mask_sizes:
+            stats['avg_mask_size'] = f"{np.mean(mask_sizes):.0f} pixels"
         
         return stats

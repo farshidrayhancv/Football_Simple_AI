@@ -1,11 +1,12 @@
-"""Extended detector with pose estimation support - Fixed version."""
+"""Extended detector with pose estimation and SAM segmentation support."""
 
 import cv2
 import numpy as np
 import supervision as sv
 from inference import get_model
-from ultralytics import YOLO
+from ultralytics import YOLO, SAM
 import time
+import torch
 
 
 class ObjectDetector:
@@ -53,7 +54,7 @@ class ObjectDetector:
 
 
 class PoseDetector:
-    def __init__(self, model_name='yolo11x-pose.pt', device='cuda'):
+    def __init__(self, model_name='yolo11x-pose.pt', device='cpu'):
         """Initialize pose detector with YOLO pose model."""
         try:
             self.model = YOLO(model_name).to(device)
@@ -201,30 +202,89 @@ class PoseDetector:
         return frame
 
 
+class SegmentationDetector:
+    def __init__(self, model_name='sam2.1_b.pt', device='cpu'):
+        """Initialize SAM model for segmentation."""
+        try:
+            self.model = SAM(model_name, co).to(device)
+            self.device = device
+            print(f"Loaded SAM model: {model_name}")
+        except Exception as e:
+            print(f"Error loading SAM model: {e}")
+            self.model = None
+    
+    def segment_boxes(self, frame, boxes):
+        """Segment objects within bounding boxes."""
+        if self.model is None or len(boxes) == 0:
+            return []
+        
+        try:
+            # Convert boxes to list format for SAM and add Padding
+            # boxes.xyxy = sv.pad_boxes(xyxy=boxes.xyxy, px=10)
+            boxes_list = boxes.tolist() if isinstance(boxes, np.ndarray) else boxes
+            
+            
+            
+            # Run SAM with bounding box prompts
+            results = self.model(frame, bboxes=boxes_list, verbose=False, device=self.device)
+            
+            # Extract masks
+            masks = []
+            if results and len(results) > 0:
+                for result in results:
+                    if hasattr(result, 'masks') and result.masks is not None:
+                        # Get the mask data
+                        mask_data = result.masks.data.cpu().numpy()
+                        if mask_data.ndim >= 2:
+                            masks.append(mask_data[0])  # Take first mask
+                        else:
+                            masks.append(mask_data)
+                    else:
+                        masks.append(None)
+            
+            return masks
+            
+        except Exception as e:
+            print(f"Segmentation error: {e}")
+            return [None] * len(boxes)
+
+
 class EnhancedObjectDetector(ObjectDetector):
-    """Object detector with integrated pose estimation."""
+    """Object detector with integrated pose estimation and segmentation."""
     
     def __init__(self, model_id, api_key, confidence_threshold=0.5, 
-                 enable_pose=True, pose_model='yolov8m-pose.pt', device='cpu'):
+                 enable_pose=True, pose_model='yolov8m-pose.pt',
+                 enable_segmentation=True, sam_model='sam2.1_b.pt', 
+                 device='cpu'):
         super().__init__(model_id, api_key, confidence_threshold)
         
         self.enable_pose = enable_pose
+        self.enable_segmentation = enable_segmentation
+        
         if self.enable_pose:
             try:
                 self.pose_detector = PoseDetector(pose_model, device)
             except Exception as e:
                 print(f"Failed to initialize pose detector: {e}")
                 self.enable_pose = False
+        
+        if self.enable_segmentation:
+            try:
+                self.segmentation_detector = SegmentationDetector(sam_model, device, )
+            except Exception as e:
+                print(f"Failed to initialize segmentation detector: {e}")
+                self.enable_segmentation = False
     
-    def detect_with_pose(self, frame):
-        """Detect objects and estimate poses for players."""
+    def detect_with_pose_and_segmentation(self, frame):
+        """Detect objects, estimate poses, and segment players."""
         # Get standard detections
         detections = self.detect_categories(frame)
         
-        if not self.enable_pose:
-            return detections, None
+        # Initialize outputs
+        poses = None
+        segmentations = None
         
-        # Combine players and goalkeepers for pose estimation
+        # Combine players and goalkeepers for pose and segmentation
         all_players = []
         player_indices = []
         
@@ -238,13 +298,10 @@ class EnhancedObjectDetector(ObjectDetector):
             all_players.extend(detections['goalkeepers'].xyxy)
             player_indices.extend(['goalkeeper'] * len(detections['goalkeepers']))
         
-        # Estimate poses
-        poses = {
-            'players': [],
-            'goalkeepers': []
-        }
-        
-        if all_players:
+        # Estimate poses if enabled
+        if self.enable_pose and all_players:
+            poses = {'players': [], 'goalkeepers': []}
+            
             try:
                 pose_results = self.pose_detector.detect_poses(frame, np.array(all_players))
                 
@@ -262,10 +319,39 @@ class EnhancedObjectDetector(ObjectDetector):
                         
             except Exception as e:
                 print(f"Error during pose estimation: {e}")
-                # Return empty poses on error
                 poses['players'] = [None] * len(detections['players'])
                 poses['goalkeepers'] = [None] * len(detections['goalkeepers'])
         
+        # Segment players if enabled
+        if self.enable_segmentation and all_players:
+            segmentations = {'players': [], 'goalkeepers': []}
+            
+            try:
+                seg_results = self.segmentation_detector.segment_boxes(frame, np.array(all_players))
+                
+                # Organize segmentations by player type
+                player_idx = 0
+                goalkeeper_idx = 0
+                
+                for i, (mask, player_type) in enumerate(zip(seg_results, player_indices)):
+                    if player_type == 'player':
+                        segmentations['players'].append(mask)
+                        player_idx += 1
+                    else:
+                        segmentations['goalkeepers'].append(mask)
+                        goalkeeper_idx += 1
+                        
+            except Exception as e:
+                print(f"Error during segmentation: {e}")
+                segmentations['players'] = [None] * len(detections['players'])
+                segmentations['goalkeepers'] = [None] * len(detections['goalkeepers'])
+        
+        return detections, poses, segmentations
+    
+    # Keep backward compatibility
+    def detect_with_pose(self, frame):
+        """Backward compatible method for pose-only detection."""
+        detections, poses, _ = self.detect_with_pose_and_segmentation(frame)
         return detections, poses
 
 

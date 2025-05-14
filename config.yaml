@@ -11,13 +11,14 @@ models:
   player_detection_model_id: "football-players-detection-3zvbc/11"
   field_detection_model_id: "football-field-detection-f07vi/14"
   siglip_model_path: "google/siglip-base-patch16-224"
+  pose_model: "yolo11x-pose.pt" ##TODO: Needs to be trained on Player Pose Dataset See here: https://worldpose.ait.ethz.ch/
 
 # Video Processing Settings
 video:
   # Input video file - update with your video path
-  input_path: "/workspaces/Football/videos/08fd33_0.mp4"
+  input_path: "/home/farshid/proj/Football/videos/08fd33_0.mp4"
   # Output video file (optional)
-  output_path: "//workspaces/Football/videos"
+  output_path: "/home/farshid/proj/Football/videos/"
   # Frame stride for training team classifier
   stride: 30
   # FPS for display
@@ -28,6 +29,26 @@ detection:
   confidence_threshold: 0.3
   nms_threshold: 0.5
   keypoint_confidence_threshold: 0.5
+  # Pose detection confidence threshold
+  pose_confidence_threshold: 0.5
+  # SAM model for segmentation (sam2.1_b.pt, sam2.1_l.pt, sam2.1_s.pt)
+  sam_model: "sam2.1_b.pt"
+
+# SAHI (Slicing Adaptive Inference) Settings
+sahi:
+  # Enable SAHI for better small object detection
+  enable: true
+  # Slice configuration (2x2 means 4 slices)
+  slice_rows: 2
+  slice_cols: 2
+  # Or specify exact slice dimensions
+  slice_height: 640
+  slice_width: 640
+  # Overlap between slices (0.0 to 1.0)
+  overlap_ratio: 0.2
+  # Postprocessing
+  postprocess_type: "NMU"  # Non-Maximum Union
+  postprocess_match_threshold: 0.5
 
 # Tracking Settings
 tracking:
@@ -46,7 +67,14 @@ display:
   # Show or hide elements
   show_tracking_ids: true
   show_ball: true
-  show_voronoi: true
+  show_voronoi: false
+  # Enable pose estimation visualization
+  show_pose: true
+  # Enable segmentation visualization
+  show_segmentation: true
+  # Segmentation transparency (0.0 - 1.0)
+  segmentation_alpha: 0.6
+
   # Colors (in hex)
   team_colors:
     team_1: "#00BFFF"  # Light blue

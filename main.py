@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main Football AI Application with Pose Estimation
+Main Football AI Application with Pose Estimation and Segmentation
 """
 
 import argparse
@@ -35,9 +35,11 @@ class FootballAI:
         """Initialize all required models."""
         print("Loading models...")
         
-        # Use enhanced detector with pose estimation
+        # Use enhanced detector with pose estimation and segmentation
         enable_pose = self.config.get('display', {}).get('show_pose', True)
+        enable_segmentation = self.config.get('display', {}).get('show_segmentation', True)
         pose_model = self.config.get('models', {}).get('pose_model', 'yolov8m-pose.pt')
+        sam_model = self.config.get('models', {}).get('sam_model', 'sam2.1_b.pt')
         
         self.player_detector = EnhancedObjectDetector(
             model_id=self.config['models']['player_detection_model_id'],
@@ -45,6 +47,8 @@ class FootballAI:
             confidence_threshold=self.config['detection']['confidence_threshold'],
             enable_pose=enable_pose,
             pose_model=pose_model,
+            enable_segmentation=enable_segmentation,
+            sam_model=sam_model,
             device=self.config['performance']['device']
         )
         
@@ -112,8 +116,8 @@ class FootballAI:
         # Train team classifier
         self.train_team_classifier(video_path)
         
-        # Process video with pose estimation
-        self.video_processor.process_video_with_pose(
+        # Process video with pose estimation and segmentation
+        self.video_processor.process_video_with_pose_and_segmentation(
             video_path=video_path,
             output_path=output_path,
             frame_processor=self.frame_processor,
@@ -124,7 +128,7 @@ class FootballAI:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Football AI Demo with Pose Estimation')
+    parser = argparse.ArgumentParser(description='Football AI Demo with Pose and Segmentation')
     parser.add_argument('--config', type=str, required=True,
                       help='Path to config file')
     parser.add_argument('--output', type=str, default=None,

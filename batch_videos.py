@@ -43,7 +43,7 @@ def process_videos(config_path, input_pattern, output_dir):
             yaml.dump(config, f)
         
         # Run headless processing
-        cmd = f"python football.py --config {temp_config_path} --output {output_path}"
+        cmd = f"python3 main.py --config {temp_config_path} --output {output_path}"
         print(f"Running: {cmd}")
         os.system(cmd)
         
