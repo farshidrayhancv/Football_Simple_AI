@@ -16,6 +16,8 @@ plotly>=5.14.0
 supervision>=0.23.0
 inference-gpu>=0.9.17
 ultralytics>=8.1.0
+sahi>=0.11.14
+shapely>=2.0.0
 
 # Sports analytics
 sports @ git+https://github.com/roboflow/sports.git

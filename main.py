@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main Football AI Application with Pose Estimation
+Main Football AI Application with SAHI and Pose Estimation
 """
 
 import argparse
@@ -35,7 +35,33 @@ class FootballAI:
         """Initialize all required models."""
         print("Loading models...")
         
-        # Use enhanced detector with pose estimation
+        # Get SAHI configuration
+        sahi_enabled = self.config.get('sahi', {}).get('enable', False)
+        sahi_config = None
+        
+        if sahi_enabled:
+            print("SAHI enabled - using sliced inference")
+            # Calculate slice dimensions from rows/cols if specified
+            sahi_settings = self.config.get('sahi', {})
+            
+            if 'slice_rows' in sahi_settings and 'slice_cols' in sahi_settings:
+                # Calculate dimensions based on typical video resolution
+                # This will be adjusted per frame if needed
+                slice_height = 1080 // sahi_settings['slice_rows']
+                slice_width = 1920 // sahi_settings['slice_cols']
+            else:
+                slice_height = sahi_settings.get('slice_height', 640)
+                slice_width = sahi_settings.get('slice_width', 640)
+            
+            sahi_config = {
+                'slice_height': slice_height,
+                'slice_width': slice_width,
+                'overlap_ratio': sahi_settings.get('overlap_ratio', 0.2)
+            }
+            
+            print(f"SAHI config: {sahi_config}")
+        
+        # Use enhanced detector with pose estimation and SAHI
         enable_pose = self.config.get('display', {}).get('show_pose', True)
         pose_model = self.config.get('models', {}).get('pose_model', 'yolov8m-pose.pt')
         
@@ -45,7 +71,9 @@ class FootballAI:
             confidence_threshold=self.config['detection']['confidence_threshold'],
             enable_pose=enable_pose,
             pose_model=pose_model,
-            device=self.config['performance']['device']
+            device=self.config['performance']['device'],
+            enable_sahi=sahi_enabled,
+            sahi_config=sahi_config
         )
         
         self.field_detector = FieldDetector(
@@ -109,10 +137,16 @@ class FootballAI:
         
         print(f"Processing video: {video_path}")
         
+        # Print configuration summary
+        print("\nConfiguration Summary:")
+        print(f"- SAHI: {'Enabled' if self.config.get('sahi', {}).get('enable', False) else 'Disabled'}")
+        print(f"- Pose: {'Enabled' if self.config.get('display', {}).get('show_pose', True) else 'Disabled'}")
+        print(f"- Device: {self.config['performance']['device']}")
+        
         # Train team classifier
         self.train_team_classifier(video_path)
         
-        # Process video with pose estimation
+        # Process video with pose estimation and SAHI
         self.video_processor.process_video_with_pose(
             video_path=video_path,
             output_path=output_path,
@@ -124,7 +158,7 @@ class FootballAI:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Football AI Demo with Pose Estimation')
+    parser = argparse.ArgumentParser(description='Football AI Demo with SAHI and Pose Estimation')
     parser.add_argument('--config', type=str, required=True,
                       help='Path to config file')
     parser.add_argument('--output', type=str, default=None,

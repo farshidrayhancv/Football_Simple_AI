@@ -1,10 +1,12 @@
-"""Extended detector with pose estimation support - Fixed version."""
+"""Extended detector with SAHI support."""
 
 import cv2
 import numpy as np
 import supervision as sv
 from inference import get_model
 from ultralytics import YOLO
+from sahi import AutoDetectionModel
+from sahi.predict import get_sliced_prediction
 import time
 
 
@@ -52,8 +54,87 @@ class ObjectDetector:
         }
 
 
+class SAHIDetector(ObjectDetector):
+    """Object detector with SAHI (Slicing Adaptive Inference) support."""
+    
+    def __init__(self, model_id, api_key, confidence_threshold=0.5, 
+                 slice_height=640, slice_width=640, overlap_ratio=0.2):
+        super().__init__(model_id, api_key, confidence_threshold)
+        
+        # SAHI configuration
+        self.slice_height = slice_height
+        self.slice_width = slice_width
+        self.overlap_ratio = overlap_ratio
+        
+        # Create SAHI detection model wrapper
+        self.sahi_model = AutoDetectionModel.from_pretrained(
+            model_type="ultralytics",
+            model=self.model,
+            confidence_threshold=confidence_threshold,
+            device='cuda'  # Will be set based on actual device
+        )
+    
+    def detect(self, frame):
+        """Detect using SAHI sliced prediction."""
+        try:
+            # Get sliced prediction
+            result = get_sliced_prediction(
+                image=frame,
+                detection_model=self.sahi_model,
+                slice_height=self.slice_height,
+                slice_width=self.slice_width,
+                slice_overlap_height_ratio=self.overlap_ratio,
+                slice_overlap_width_ratio=self.overlap_ratio,
+                perform_standard_pred=True,  # Also run on full image
+                postprocess_type="NMU",  # Non-Maximum Union
+                postprocess_match_threshold=0.5,
+                postprocess_class_agnostic=False,
+                verbose=0
+            )
+            
+            # Convert SAHI results to supervision Detections
+            return self._sahi_to_sv_detections(result, frame.shape)
+            
+        except Exception as e:
+            print(f"SAHI detection failed, falling back to standard: {e}")
+            # Fallback to standard detection
+            return super().detect(frame)
+    
+    def _sahi_to_sv_detections(self, sahi_result, img_shape):
+        """Convert SAHI results to supervision Detections format."""
+        if not sahi_result.object_prediction_list:
+            # Return empty detections
+            return sv.Detections(
+                xyxy=np.empty((0, 4), dtype=np.float32),
+                confidence=np.empty((0,), dtype=np.float32),
+                class_id=np.empty((0,), dtype=int)
+            )
+        
+        boxes = []
+        scores = []
+        class_ids = []
+        
+        for pred in sahi_result.object_prediction_list:
+            # Get bounding box
+            bbox = pred.bbox.to_xywh()
+            x, y, w, h = bbox
+            xyxy = [x, y, x + w, y + h]
+            boxes.append(xyxy)
+            
+            # Get confidence and class
+            scores.append(pred.score.value)
+            class_ids.append(pred.category.id)
+        
+        # Create supervision Detections
+        return sv.Detections(
+            xyxy=np.array(boxes, dtype=np.float32),
+            confidence=np.array(scores, dtype=np.float32),
+            class_id=np.array(class_ids, dtype=int)
+        )
+
+
 class PoseDetector:
-    def __init__(self, model_name='yolo11x-pose.pt', device='cuda'):
+    def __init__(self, model_name='yolov8n-pose.pt', device='cpu'):
         """Initialize pose detector with YOLO pose model."""
         try:
             self.model = YOLO(model_name).to(device)
@@ -202,11 +283,30 @@ class PoseDetector:
 
 
 class EnhancedObjectDetector(ObjectDetector):
-    """Object detector with integrated pose estimation."""
+    """Object detector with integrated pose estimation and SAHI support."""
     
     def __init__(self, model_id, api_key, confidence_threshold=0.5, 
-                 enable_pose=True, pose_model='yolov8m-pose.pt', device='cpu'):
-        super().__init__(model_id, api_key, confidence_threshold)
+                 enable_pose=True, pose_model='yolov8m-pose.pt', device='cpu',
+                 enable_sahi=False, sahi_config=None):
+        # Initialize base detector or SAHI detector
+        if enable_sahi:
+            sahi_config = sahi_config or {}
+            self._base_detector = SAHIDetector(
+                model_id=model_id,
+                api_key=api_key,
+                confidence_threshold=confidence_threshold,
+                **sahi_config
+            )
+            # Copy necessary attributes
+            self.model = self._base_detector.model
+            self.confidence_threshold = confidence_threshold
+            self.BALL_ID = self._base_detector.BALL_ID
+            self.GOALKEEPER_ID = self._base_detector.GOALKEEPER_ID
+            self.PLAYER_ID = self._base_detector.PLAYER_ID
+            self.REFEREE_ID = self._base_detector.REFEREE_ID
+        else:
+            super().__init__(model_id, api_key, confidence_threshold)
+            self._base_detector = self
         
         self.enable_pose = enable_pose
         if self.enable_pose:
@@ -215,6 +315,14 @@ class EnhancedObjectDetector(ObjectDetector):
             except Exception as e:
                 print(f"Failed to initialize pose detector: {e}")
                 self.enable_pose = False
+    
+    def detect(self, frame):
+        """Detect using base detector (standard or SAHI)."""
+        return self._base_detector.detect(frame)
+    
+    def detect_categories(self, frame):
+        """Detect categories using base detector."""
+        return self._base_detector.detect_categories(frame)
     
     def detect_with_pose(self, frame):
         """Detect objects and estimate poses for players."""
