@@ -1,4 +1,4 @@
-"""Extended detector with pose estimation and SAM segmentation support."""
+"""Extended detector with pose estimation and SAM segmentation support - with bbox padding."""
 
 import cv2
 import numpy as np
@@ -54,7 +54,7 @@ class ObjectDetector:
 
 
 class PoseDetector:
-    def __init__(self, model_name='yolo11x-pose.pt', device='cpu'):
+    def __init__(self, model_name='yolov8n-pose.pt', device='cpu'):
         """Initialize pose detector with YOLO pose model."""
         try:
             self.model = YOLO(model_name).to(device)
@@ -206,7 +206,7 @@ class SegmentationDetector:
     def __init__(self, model_name='sam2.1_b.pt', device='cpu'):
         """Initialize SAM model for segmentation."""
         try:
-            self.model = SAM(model_name, co).to(device)
+            self.model = SAM(model_name).to(device)
             self.device = device
             print(f"Loaded SAM model: {model_name}")
         except Exception as e:
@@ -219,11 +219,8 @@ class SegmentationDetector:
             return []
         
         try:
-            # Convert boxes to list format for SAM and add Padding
-            # boxes.xyxy = sv.pad_boxes(xyxy=boxes.xyxy, px=10)
+            # Convert boxes to list format for SAM
             boxes_list = boxes.tolist() if isinstance(boxes, np.ndarray) else boxes
-            
-            
             
             # Run SAM with bounding box prompts
             results = self.model(frame, bboxes=boxes_list, verbose=False, device=self.device)
@@ -255,11 +252,12 @@ class EnhancedObjectDetector(ObjectDetector):
     def __init__(self, model_id, api_key, confidence_threshold=0.5, 
                  enable_pose=True, pose_model='yolov8m-pose.pt',
                  enable_segmentation=True, sam_model='sam2.1_b.pt', 
-                 device='cpu'):
+                 segmentation_padding=15, device='cpu'):
         super().__init__(model_id, api_key, confidence_threshold)
         
         self.enable_pose = enable_pose
         self.enable_segmentation = enable_segmentation
+        self.segmentation_padding = segmentation_padding  # Padding for bbox before SAM
         
         if self.enable_pose:
             try:
@@ -270,7 +268,7 @@ class EnhancedObjectDetector(ObjectDetector):
         
         if self.enable_segmentation:
             try:
-                self.segmentation_detector = SegmentationDetector(sam_model, device, )
+                self.segmentation_detector = SegmentationDetector(sam_model, device)
             except Exception as e:
                 print(f"Failed to initialize segmentation detector: {e}")
                 self.enable_segmentation = False
@@ -327,7 +325,21 @@ class EnhancedObjectDetector(ObjectDetector):
             segmentations = {'players': [], 'goalkeepers': []}
             
             try:
-                seg_results = self.segmentation_detector.segment_boxes(frame, np.array(all_players))
+                # Add padding to bounding boxes for better segmentation
+                padded_boxes = []
+                for box in all_players:
+                    x1, y1, x2, y2 = box
+                    
+                    # Add padding
+                    x1 = max(0, x1 - self.segmentation_padding)
+                    y1 = max(0, y1 - self.segmentation_padding)
+                    x2 = min(frame.shape[1], x2 + self.segmentation_padding)
+                    y2 = min(frame.shape[0], y2 + self.segmentation_padding)
+                    
+                    padded_boxes.append([x1, y1, x2, y2])
+                
+                # Run segmentation with padded boxes
+                seg_results = self.segmentation_detector.segment_boxes(frame, np.array(padded_boxes))
                 
                 # Organize segmentations by player type
                 player_idx = 0

@@ -40,6 +40,7 @@ class FootballAI:
         enable_segmentation = self.config.get('display', {}).get('show_segmentation', True)
         pose_model = self.config.get('models', {}).get('pose_model', 'yolov8m-pose.pt')
         sam_model = self.config.get('models', {}).get('sam_model', 'sam2.1_b.pt')
+        segmentation_padding = self.config.get('detection', {}).get('segmentation_padding', 15)
         
         self.player_detector = EnhancedObjectDetector(
             model_id=self.config['models']['player_detection_model_id'],
@@ -49,6 +50,7 @@ class FootballAI:
             pose_model=pose_model,
             enable_segmentation=enable_segmentation,
             sam_model=sam_model,
+            segmentation_padding=segmentation_padding,
             device=self.config['performance']['device']
         )
         
@@ -112,6 +114,7 @@ class FootballAI:
             raise FileNotFoundError(f"Video file not found: {video_path}")
         
         print(f"Processing video: {video_path}")
+        print(f"Segmentation padding: {self.config.get('detection', {}).get('segmentation_padding', 15)} pixels")
         
         # Train team classifier
         self.train_team_classifier(video_path)
