@@ -13,7 +13,7 @@ A simple computer vision system that analyzes football match videos to detect pl
 ![Football AI Preview](preview_pose.jpg)
 
 
-### (Object Detection + Tracking) + Pose Estimation + Segmentation 
+### (Object Detection + Tracking) + Pose Estimation + Segmentation (Plauer #6)
 ![Football AI Preview](Preview_seg.png)
 
 ## Features
