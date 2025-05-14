@@ -15,6 +15,7 @@ plotly>=5.14.0
 # Computer vision and ML
 supervision>=0.23.0
 inference-gpu>=0.9.17
+ultralytics>=8.1.0
 
 # Sports analytics
 sports @ git+https://github.com/roboflow/sports.git

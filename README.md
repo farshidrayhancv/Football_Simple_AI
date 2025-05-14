@@ -8,6 +8,7 @@ A simple computer vision system that analyzes football match videos to detect pl
 ![Football AI Preview](preview.jpg)
 
 
+![Football AI Preview](preview_pose.jpg)
 
 ## Features
 

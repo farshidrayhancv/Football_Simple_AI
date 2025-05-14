@@ -1,4 +1,4 @@
-"""Frame processing module."""
+"""Frame processing module with pose estimation support."""
 
 import cv2
 import numpy as np
@@ -17,15 +17,25 @@ class FrameProcessor:
         
         self.team_resolver = TeamResolver()
         self.coordinate_transformer = CoordinateTransformer(config)
+        
+        # Check if pose is enabled
+        self.enable_pose = config.get('display', {}).get('show_pose', True)
     
     def process_frame(self, frame):
-        """Process a single frame."""
-        # Player detection
-        result = self.player_detector.detect_categories(frame)
-        all_detections = result['all']
+        """Process a single frame with pose estimation."""
+        # Use enhanced detector if pose is enabled
+        if self.enable_pose and hasattr(self.player_detector, 'detect_with_pose'):
+            result = self.player_detector.detect_categories(frame)
+            detections_dict, poses = self.player_detector.detect_with_pose(frame)
+        else:
+            result = self.player_detector.detect_categories(frame)
+            detections_dict = result
+            poses = None
+        
+        all_detections = detections_dict['all']
         
         # Separate ball detections
-        ball_detections = result['ball']
+        ball_detections = detections_dict['ball']
         ball_detections.xyxy = sv.pad_boxes(xyxy=ball_detections.xyxy, px=10)
         
         # Process other detections
@@ -66,7 +76,12 @@ class FrameProcessor:
             if len(pitch_ball_xy) > 0:
                 self.tracker.update_ball_trail(pitch_ball_xy[0])
         
-        return detections, transformer
+        # Calculate pose statistics if poses are available
+        pose_stats = None
+        if poses:
+            pose_stats = self._calculate_pose_stats(poses)
+        
+        return detections, transformer, poses, pose_stats
     
     def _assign_teams(self, frame, players):
         """Assign teams to players."""
@@ -93,3 +108,28 @@ class FrameProcessor:
                 transformer.m = averaged_matrix
         
         return transformer
+    
+    def _calculate_pose_stats(self, poses):
+        """Calculate statistics from pose data."""
+        stats = {}
+        
+        # Count detected poses
+        player_poses_detected = sum(1 for p in poses.get('players', []) if p is not None)
+        goalkeeper_poses_detected = sum(1 for p in poses.get('goalkeepers', []) if p is not None)
+        
+        stats['player_poses'] = player_poses_detected
+        stats['goalkeeper_poses'] = goalkeeper_poses_detected
+        stats['total_poses'] = player_poses_detected + goalkeeper_poses_detected
+        
+        # Calculate average pose confidence if available
+        all_confidences = []
+        for category in ['players', 'goalkeepers']:
+            if category in poses:
+                for pose in poses[category]:
+                    if pose and 'confidence' in pose:
+                        all_confidences.extend(pose['confidence'])
+        
+        if all_confidences:
+            stats['avg_confidence'] = f"{np.mean(all_confidences):.2f}"
+        
+        return stats

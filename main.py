@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main Football AI Application - Refactored Version
+Main Football AI Application with Pose Estimation
 """
 
 import argparse
@@ -8,7 +8,7 @@ import os
 import sys
 
 from config.config_loader import ConfigLoader
-from models.detector import ObjectDetector, FieldDetector
+from models.detector import EnhancedObjectDetector, FieldDetector
 from models.classifier import TeamClassifierModule
 from models.tracker import ObjectTracker
 from processing.frame_processor import FrameProcessor
@@ -35,9 +35,17 @@ class FootballAI:
         """Initialize all required models."""
         print("Loading models...")
         
-        self.player_detector = ObjectDetector(
+        # Use enhanced detector with pose estimation
+        enable_pose = self.config.get('display', {}).get('show_pose', True)
+        pose_model = self.config.get('models', {}).get('pose_model', 'yolov8m-pose.pt')
+        
+        self.player_detector = EnhancedObjectDetector(
             model_id=self.config['models']['player_detection_model_id'],
-            api_key=self.config['api_keys']['roboflow_api_key']
+            api_key=self.config['api_keys']['roboflow_api_key'],
+            confidence_threshold=self.config['detection']['confidence_threshold'],
+            enable_pose=enable_pose,
+            pose_model=pose_model,
+            device=self.config['performance']['device']
         )
         
         self.field_detector = FieldDetector(
@@ -49,7 +57,7 @@ class FootballAI:
         self.team_classifier = TeamClassifierModule(
             device=self.config['performance']['device'],
             hf_token=self.config['api_keys']['huggingface_token'],
-            model_path=self.config['models']['siglip_model_path']  # Added this
+            model_path=self.config['models']['siglip_model_path']
         )
         
         self.tracker = ObjectTracker()
@@ -104,8 +112,8 @@ class FootballAI:
         # Train team classifier
         self.train_team_classifier(video_path)
         
-        # Process video
-        self.video_processor.process_video(
+        # Process video with pose estimation
+        self.video_processor.process_video_with_pose(
             video_path=video_path,
             output_path=output_path,
             frame_processor=self.frame_processor,
@@ -116,7 +124,7 @@ class FootballAI:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Football AI Demo')
+    parser = argparse.ArgumentParser(description='Football AI Demo with Pose Estimation')
     parser.add_argument('--config', type=str, required=True,
                       help='Path to config file')
     parser.add_argument('--output', type=str, default=None,
