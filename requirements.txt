@@ -16,7 +16,7 @@ plotly>=5.14.0
 supervision>=0.23.0
 inference-gpu>=0.9.17
 ultralytics>=8.1.0
-sahi>=0.11.14
+sahi>=0.11.14 # for YOLOv8
 shapely>=2.0.0
 
 # Sports analytics
