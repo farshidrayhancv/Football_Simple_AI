@@ -1,10 +1,11 @@
-"""Frame processing module with pose estimation and segmentation support."""
+"""Frame processing module with pose, segmentation, and SAHI support."""
 
 import cv2
 import numpy as np
 import supervision as sv
 from .team_resolver import TeamResolver
 from .coordinate_transformer import CoordinateTransformer
+from .sahi_processor import SAHIProcessor
 
 
 class FrameProcessor:
@@ -17,28 +18,41 @@ class FrameProcessor:
         
         self.team_resolver = TeamResolver()
         self.coordinate_transformer = CoordinateTransformer(config)
+        self.sahi_processor = SAHIProcessor(config)
         
-        # Check if pose and segmentation are enabled
+        # Check if features are enabled
         self.enable_pose = config.get('display', {}).get('show_pose', True)
         self.enable_segmentation = config.get('display', {}).get('show_segmentation', True)
+        self.enable_sahi = config.get('sahi', {}).get('enable', False)
     
     def process_frame(self, frame):
-        """Process a single frame with pose estimation and segmentation."""
-        # Use enhanced detector if enabled
-        if hasattr(self.player_detector, 'detect_with_pose_and_segmentation'):
-            detections_dict, poses, segmentations = self.player_detector.detect_with_pose_and_segmentation(frame)
+        """Process a single frame with SAHI, pose estimation and segmentation."""
+        # Process with SAHI if enabled
+        if self.enable_sahi:
+            detections_dict, poses, segmentations = self.sahi_processor.process_with_sahi(
+                frame, 
+                self.player_detector,
+                self.enable_pose,
+                self.enable_segmentation
+            )
         else:
-            # Fallback to basic detection
-            result = self.player_detector.detect_categories(frame)
-            detections_dict = result
-            poses = None
-            segmentations = None
+            # Use standard processing
+            if hasattr(self.player_detector, 'detect_with_pose_and_segmentation'):
+                detections_dict, poses, segmentations = self.player_detector.detect_with_pose_and_segmentation(frame)
+            else:
+                # Fallback to basic detection
+                result = self.player_detector.detect_categories(frame)
+                detections_dict = result
+                poses = None
+                segmentations = None
         
-        all_detections = detections_dict['all']
+        # Get all detections
+        all_detections = self._merge_all_detections(detections_dict)
         
         # Separate ball detections
         ball_detections = detections_dict['ball']
-        ball_detections.xyxy = sv.pad_boxes(xyxy=ball_detections.xyxy, px=10)
+        if len(ball_detections) > 0:
+            ball_detections.xyxy = sv.pad_boxes(xyxy=ball_detections.xyxy, px=10)
         
         # Process other detections
         non_ball_detections = all_detections[all_detections.class_id != self.player_detector.BALL_ID]
@@ -81,6 +95,7 @@ class FrameProcessor:
         # Calculate statistics
         pose_stats = None
         seg_stats = None
+        sahi_stats = None
         
         if poses:
             pose_stats = self._calculate_pose_stats(poses)
@@ -88,7 +103,23 @@ class FrameProcessor:
         if segmentations:
             seg_stats = self._calculate_segmentation_stats(segmentations)
         
-        return detections, transformer, poses, pose_stats, segmentations, seg_stats
+        if self.enable_sahi:
+            sahi_stats = self._calculate_sahi_stats(detections)
+        
+        return detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats
+    
+    def _merge_all_detections(self, detections_dict):
+        """Merge all category detections."""
+        all_detections = []
+        
+        for category in ['ball', 'goalkeepers', 'players', 'referees']:
+            if category in detections_dict and len(detections_dict[category]) > 0:
+                all_detections.append(detections_dict[category])
+        
+        if all_detections:
+            return sv.Detections.merge(all_detections)
+        else:
+            return sv.Detections.empty()
     
     def _assign_teams(self, frame, players):
         """Assign teams to players."""
@@ -163,5 +194,18 @@ class FrameProcessor:
         
         if mask_sizes:
             stats['avg_mask_size'] = f"{np.mean(mask_sizes):.0f} pixels"
+        
+        return stats
+    
+    def _calculate_sahi_stats(self, detections):
+        """Calculate SAHI statistics."""
+        stats = {}
+        
+        total_detections = 0
+        for category in ['players', 'goalkeepers', 'referees', 'ball']:
+            total_detections += len(detections[category])
+        
+        stats['total_detections'] = total_detections
+        stats['slices'] = f"{self.config['sahi']['slice_rows']} x {self.config['sahi']['slice_cols']}"
         
         return stats

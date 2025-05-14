@@ -1,4 +1,4 @@
-"""Video processing utilities with pose estimation and segmentation support."""
+"""Video processing utilities with pose, segmentation, and SAHI support."""
 
 import cv2
 import numpy as np
@@ -43,7 +43,7 @@ class VideoProcessor:
     
     def process_video_with_pose_and_segmentation(self, video_path, output_path, frame_processor, 
                                                 annotator, pitch_renderer, tracker):
-        """Process video with pose estimation and segmentation support."""
+        """Process video with pose estimation, segmentation, and SAHI support."""
         # Open video
         cap = cv2.VideoCapture(video_path)
         
@@ -56,7 +56,14 @@ class VideoProcessor:
         # Set output path
         if output_path is None:
             base_name = os.path.splitext(os.path.basename(video_path))[0]
-            output_path = f"{base_name}_football_ai_with_pose_seg.mp4"
+            output_suffix = "_football_ai"
+            if self.config.get('sahi', {}).get('enable', False):
+                output_suffix += "_sahi"
+            if self.config.get('display', {}).get('show_pose', False):
+                output_suffix += "_pose"
+            if self.config.get('display', {}).get('show_segmentation', False):
+                output_suffix += "_seg"
+            output_path = f"{base_name}{output_suffix}.mp4"
         
         # Create video writer
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -64,7 +71,17 @@ class VideoProcessor:
         out_height = max(height, 600)
         out = cv2.VideoWriter(output_path, fourcc, fps, (out_width, out_height))
         
-        print(f"Processing {total_frames} frames with pose estimation and segmentation...")
+        # Processing description
+        features = []
+        if self.config.get('sahi', {}).get('enable', False):
+            features.append("SAHI")
+        if self.config.get('display', {}).get('show_pose', False):
+            features.append("pose estimation")
+        if self.config.get('display', {}).get('show_segmentation', False):
+            features.append("segmentation")
+        
+        features_str = " with " + ", ".join(features) if features else ""
+        print(f"Processing {total_frames} frames{features_str}...")
         
         # Process frames
         with tqdm(total=total_frames, desc="Processing frames") as pbar:
@@ -75,19 +92,18 @@ class VideoProcessor:
                 if not ret:
                     break
                 
-                # Process frame with pose estimation and segmentation
+                # Process frame with all features
                 results = frame_processor.process_frame(frame)
                 
-                # Unpack results (now includes segmentation)
-                if len(results) == 6:
-                    detections, transformer, poses, pose_stats, segmentations, seg_stats = results
+                # Unpack results (now includes SAHI stats)
+                if len(results) == 7:
+                    detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats = results
                 else:
                     # Fallback for older versions
-                    detections, transformer, poses, pose_stats = results
-                    segmentations = None
-                    seg_stats = None
+                    detections, transformer, poses, pose_stats, segmentations, seg_stats = results[:6]
+                    sahi_stats = None
                 
-                # Create visualizations with pose and segmentation
+                # Create visualizations
                 if segmentations:
                     annotated_frame = annotator.annotate_frame_with_pose_and_segmentation(
                         frame, detections, poses, segmentations
@@ -104,6 +120,11 @@ class VideoProcessor:
                     'Goalkeepers': len(detections['goalkeepers'])
                 }
                 
+                # Add SAHI info if enabled
+                if sahi_stats:
+                    annotated_frame = self._draw_sahi_info(annotated_frame, sahi_stats)
+                
+                # Draw all statistics
                 annotated_frame = annotator.draw_stats_with_pose_and_segmentation(
                     annotated_frame, stats, pose_stats, seg_stats
                 )
@@ -134,6 +155,24 @@ class VideoProcessor:
         out.release()
         
         print(f"Processing complete! Output saved to: {output_path}")
+    
+    def _draw_sahi_info(self, frame, sahi_stats):
+        """Draw SAHI information on frame."""
+        if not sahi_stats:
+            return frame
+        
+        # Draw SAHI info in top right corner
+        y_offset = 30
+        x_offset = frame.shape[1] - 200
+        
+        cv2.putText(frame, "SAHI Enabled", (x_offset, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        y_offset += 25
+        
+        cv2.putText(frame, f"Slices: {sahi_stats['slices']}", (x_offset, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        return frame
     
     def process_video_with_pose(self, video_path, output_path, frame_processor, 
                                annotator, pitch_renderer, tracker):
@@ -167,7 +206,15 @@ class VideoProcessor:
         combined[:600, width:] = pitch_view
         
         # Add labels
-        cv2.putText(combined, "Original + Detection + Pose + Segmentation", (10, 30),
+        label = "Original"
+        if self.config.get('sahi', {}).get('enable', False):
+            label += " + SAHI"
+        if self.config.get('display', {}).get('show_pose', False):
+            label += " + Pose"
+        if self.config.get('display', {}).get('show_segmentation', False):
+            label += " + Segmentation"
+        
+        cv2.putText(combined, label, (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         cv2.putText(combined, "Tactical View", (width + 10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
