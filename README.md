@@ -48,12 +48,14 @@ A powerful computer vision system that analyses football match videos to detect 
 - **👥 Team Classification**: Automatic team assignment using AI-powered classification
 - **⚡ Ball Tracking**: Advanced ball tracking with trajectory visualisation
 - **🏟️ Field Detection**: Keypoint detection for perspective transformation
-- **🤸 Pose Estimation**: Human pose estimation for player movement analysis
-- **🎯 Player Segmentation**: Precise player segmentation based on detection bounding boxes
+- **🤸 Pose Estimation**: Human pose estimation with adaptive padding for better accuracy
+- **🎯 Player Segmentation**: Precise player segmentation with size-adaptive bounding boxes
 - **🔲 SAHI Integration**: 2x2 slicing for enhanced detection accuracy
 - **📊 Tactical View**: Top-down pitch visualisation with real-time positions
 - **💾 Smart Caching**: Intelligent model caching for optimal performance
 - **🧩 Modular Design**: Clean, testable, and maintainable code architecture
+- **📐 Adaptive Padding**: Size-aware padding for improved pose and segmentation quality
+- **🖥️ Resolution Control**: Customizable processing resolution for speed/quality balance
 
 ## 🎬 Demo Output
 
@@ -152,6 +154,24 @@ video:
   stride: 30  # Frame sampling for training
 ```
 
+### 📐 Adaptive Padding
+```yaml
+detection:
+  # Adaptive padding for pose estimation
+  pose_bbox_padding: 50
+  pose_bbox_padding_ratio: 0.5
+  # Adaptive padding for segmentation
+  segmentation_padding: 30
+  segmentation_padding_ratio: 0.3
+```
+
+### 🖥️ Processing Resolution
+```yaml
+processing:
+  # Set a custom processing resolution for speed
+  resolution: [960, 540]  # Width, height
+```
+
 ### ⚡ Performance Settings
 ```yaml
 performance:
@@ -170,7 +190,7 @@ python main.py --config config.yaml --output output_video.mp4
 ### 🧪 Test Single Frame
 
 ```bash
-python tests/debug_single_frame.py --config config.yaml --image test_frame.jpg
+python tests/test_adaptive_padding.py --config config.yaml --image test_frame.jpg
 ```
 
 ### 🐳 Using Docker
@@ -197,13 +217,14 @@ football_ai/
 │   └── config_loader.py
 ├── 🤖 models/                 # AI models
 │   ├── __init__.py
-│   ├── detector.py         # Object detection
+│   ├── detector.py         # Object detection with adaptive padding
 │   ├── classifier.py       # Team classification
 │   └── tracker.py          # Object tracking
 ├── 🔄 processing/             # Core processing logic
 │   ├── __init__.py
 │   ├── frame_processor.py  # Frame processing pipeline
 │   ├── team_resolver.py    # Team assignment logic
+│   ├── sahi_processor.py   # SAHI support for small objects
 │   └── coordinate_transformer.py
 ├── 🎨 visualisation/          # Rendering and annotation
 │   ├── __init__.py
@@ -217,6 +238,7 @@ football_ai/
 │   └── video_utils.py
 └── 🧪 tests/                 # Test scripts
     ├── __init__.py
+    ├── test_adaptive_padding.py  # Test adaptive padding
     └── debug_single_frame.py
 ```
 
@@ -232,12 +254,29 @@ football_ai/
 2. Get API key from account settings
 3. Add to config.yaml
 
+## 📐 Adaptive Padding System
+
+The system uses a sophisticated adaptive padding approach that:
+
+1. **Analyzes object size**: Smaller (distant) players get proportionally more padding
+2. **Uses different settings**: Separate parameters for pose estimation and segmentation 
+3. **Improves distant player detection**: Better pose estimation for players far from camera
+4. **Maintains object context**: Ensures enough surrounding information for accurate detection
+
+```python
+# Example of how adaptive padding works:
+size_factor = 1.0 / (box_width * box_height / (frame_width * frame_height) + 0.1)
+adaptive_padding = base_padding * (1 + padding_ratio * size_factor)
+```
+
 ## 🚀 Performance Tips
 
 1. **🎮 GPU Acceleration**: Ensure CUDA is properly installed for GPU support
 2. **📊 Frame Stride**: Increase stride value for faster processing (may reduce accuracy)
 3. **💾 Caching**: Enable caching to reuse trained classifiers
 4. **⚡ Batch Processing**: Process multiple videos sequentially
+5. **🖥️ Processing Resolution**: Lower the processing resolution for faster performance
+6. **📐 Adaptive Padding**: Adjust padding parameters to balance accuracy and performance
 
 ## 🔧 Troubleshooting
 
@@ -256,6 +295,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 - Reduce batch_size in config
 - Process shorter video segments
 - Use CPU mode if GPU memory limited
+- Lower processing resolution in config
 
 ### 🗑️ Cache issues
 ```bash
@@ -280,6 +320,8 @@ This project is licensed under the MIT Licence - see the [LICENCE](LICENCE) file
 - [Roboflow](https://roboflow.com) - Object detection models
 - [Hugging Face](https://huggingface.co) - Transformer models
 - [supervision](https://github.com/roboflow/supervision) - Computer vision utilities
+- [Ultralytics](https://github.com/ultralytics/ultralytics) - YOLO models
+- [SAM](https://segment-anything.com) - Segment Anything Model
 
 ## 📞 Support
 
