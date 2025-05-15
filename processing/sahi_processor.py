@@ -1,4 +1,4 @@
-"""SAHI (Slicing Adaptive Inference) implementation for better small object detection."""
+"""SAHI (Slicing Adaptive Inference) implementation with support for adaptive padding."""
 
 import numpy as np
 import cv2
@@ -257,7 +257,7 @@ class SAHIProcessor:
             return []
         
         combined = []
-        for category in ['players', 'goalkeepers']:
+        for category in ['players', 'goalkeepers', 'referees']:
             if category in data:
                 combined.extend(data[category])
         
@@ -277,9 +277,9 @@ class SAHIProcessor:
             'referees': detections[detections.class_id == detector.REFEREE_ID]
         }
         
-        # Split poses and masks
-        final_poses = {'players': [], 'goalkeepers': []} if poses else None
-        final_masks = {'players': [], 'goalkeepers': []} if masks else None
+        # Split poses and masks - now include referees
+        final_poses = {'players': [], 'goalkeepers': [], 'referees': []} if poses else None
+        final_masks = {'players': [], 'goalkeepers': [], 'referees': []} if masks else None
         
         if poses or masks:
             pose_idx = 0
@@ -302,6 +302,14 @@ class SAHIProcessor:
                         pose_idx += 1
                     if masks and mask_idx < len(masks):
                         final_masks['goalkeepers'].append(masks[mask_idx])
+                        mask_idx += 1
+                        
+                elif class_id == detector.REFEREE_ID:
+                    if poses and pose_idx < len(poses):
+                        final_poses['referees'].append(poses[pose_idx])
+                        pose_idx += 1
+                    if masks and mask_idx < len(masks):
+                        final_masks['referees'].append(masks[mask_idx])
                         mask_idx += 1
         
         return final_detections, final_poses, final_masks

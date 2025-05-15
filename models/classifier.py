@@ -20,7 +20,9 @@ class TeamClassifierModule:
         print(f"Loading Siglip model from: {self.model_path}")
         self.siglip_model = SiglipVisionModel.from_pretrained(
             self.model_path,
-            token=self.hf_token  # Changed from use_auth_token
+            token=self.hf_token,  # Changed from use_auth_token
+            torch_dtype=torch.float16,  # Use float16 for efficiency
+            device_map="auto"  # Let transformers handle device placement
         ).to(self.device)
         
         self.siglip_processor = AutoProcessor.from_pretrained(

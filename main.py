@@ -6,7 +6,7 @@ Main Football AI Application with Processing Resolution Support
 import argparse
 import os
 import sys
-
+import torch
 from config.config_loader import ConfigLoader
 from models.detector import EnhancedObjectDetector, FieldDetector
 from models.classifier import TeamClassifierModule
@@ -16,6 +16,16 @@ from visualization.annotators import FootballAnnotator
 from visualization.pitch_renderer import PitchRenderer
 from caching.cache_manager import CacheManager
 from utils.video_utils import VideoProcessor
+
+# CUDA Environment setup for compatibility with CUDA 12.2
+if torch.cuda.is_available():
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    print(f"CUDA version: {torch.version.cuda}")
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    
+    # Set environment variables for ONNX Runtime
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 class FootballAI:

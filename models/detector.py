@@ -1,4 +1,4 @@
-"""Extended detector with pose estimation and SAM segmentation support - with bbox padding."""
+"""Extended detector with pose estimation and SAM segmentation support - with adaptive padding."""
 
 import cv2
 import numpy as np
@@ -257,7 +257,8 @@ class EnhancedObjectDetector(ObjectDetector):
         
         self.enable_pose = enable_pose
         self.enable_segmentation = enable_segmentation
-        self.segmentation_padding = segmentation_padding  # Padding for bbox before SAM
+        self.segmentation_padding = segmentation_padding  # Legacy padding parameter
+        self.device = device
         
         if self.enable_pose:
             try:
@@ -273,8 +274,43 @@ class EnhancedObjectDetector(ObjectDetector):
                 print(f"Failed to initialize segmentation detector: {e}")
                 self.enable_segmentation = False
     
+    def _apply_adaptive_padding(self, boxes, frame_shape, base_padding, padding_ratio):
+        """Apply adaptive padding to bounding boxes based on their size.
+        
+        Args:
+            boxes: Array of bounding boxes in xyxy format
+            frame_shape: Shape of the frame (height, width)
+            base_padding: Base padding in pixels
+            padding_ratio: Scaling factor for adaptive component
+            
+        Returns:
+            Array of padded boxes
+        """
+        padded_boxes = []
+        height, width = frame_shape[:2]
+        
+        for box in boxes:
+            x1, y1, x2, y2 = box
+            box_width = x2 - x1
+            box_height = y2 - y1
+            
+            # Smaller boxes get more padding (distant players)
+            # Normalize box size relative to frame size
+            size_factor = 1.0 / (box_width * box_height / (width * height) + 0.1)
+            adaptive_padding = base_padding * (1 + padding_ratio * size_factor)
+            
+            # Apply padding with bounds checking
+            x1 = max(0, x1 - adaptive_padding)
+            y1 = max(0, y1 - adaptive_padding)
+            x2 = min(width, x2 + adaptive_padding)
+            y2 = min(height, y2 + adaptive_padding)
+            
+            padded_boxes.append([x1, y1, x2, y2])
+        
+        return np.array(padded_boxes)
+    
     def detect_with_pose_and_segmentation(self, frame):
-        """Detect objects, estimate poses, and segment players."""
+        """Detect objects, estimate poses, and segment players with adaptive padding."""
         # Get standard detections
         detections = self.detect_categories(frame)
         
@@ -282,81 +318,106 @@ class EnhancedObjectDetector(ObjectDetector):
         poses = None
         segmentations = None
         
-        # Combine players and goalkeepers for pose and segmentation
-        all_players = []
-        player_indices = []
+        # Combine players, goalkeepers, and referees for pose and segmentation
+        all_humans = []
+        human_indices = []
         
         # Add players
         if len(detections['players']) > 0:
-            all_players.extend(detections['players'].xyxy)
-            player_indices.extend(['player'] * len(detections['players']))
+            all_humans.extend(detections['players'].xyxy)
+            human_indices.extend(['player'] * len(detections['players']))
         
         # Add goalkeepers
         if len(detections['goalkeepers']) > 0:
-            all_players.extend(detections['goalkeepers'].xyxy)
-            player_indices.extend(['goalkeeper'] * len(detections['goalkeepers']))
+            all_humans.extend(detections['goalkeepers'].xyxy)
+            human_indices.extend(['goalkeeper'] * len(detections['goalkeepers']))
+            
+        # Add referees - process ALL humans including referees
+        if len(detections['referees']) > 0:
+            all_humans.extend(detections['referees'].xyxy)
+            human_indices.extend(['referee'] * len(detections['referees']))
         
         # Estimate poses if enabled
-        if self.enable_pose and all_players:
-            poses = {'players': [], 'goalkeepers': []}
+        if self.enable_pose and all_humans:
+            poses = {'players': [], 'goalkeepers': [], 'referees': []}
             
             try:
-                pose_results = self.pose_detector.detect_poses(frame, np.array(all_players))
+                # Apply adaptive padding for pose estimation
+                pose_base_padding = 50  # Default base padding for pose
+                pose_padding_ratio = 0.5  # Default padding ratio for pose
                 
-                # Organize poses by player type
+                pose_padded_boxes = self._apply_adaptive_padding(
+                    np.array(all_humans),
+                    frame.shape,
+                    pose_base_padding,
+                    pose_padding_ratio
+                )
+                
+                # Detect poses with adaptive padding
+                pose_results = self.pose_detector.detect_poses(frame, pose_padded_boxes)
+                
+                # Organize poses by human type
                 player_idx = 0
                 goalkeeper_idx = 0
+                referee_idx = 0
                 
-                for i, (pose, player_type) in enumerate(zip(pose_results, player_indices)):
-                    if player_type == 'player':
+                for i, (pose, human_type) in enumerate(zip(pose_results, human_indices)):
+                    if human_type == 'player':
                         poses['players'].append(pose)
                         player_idx += 1
-                    else:
+                    elif human_type == 'goalkeeper':
                         poses['goalkeepers'].append(pose)
                         goalkeeper_idx += 1
+                    else:  # referee
+                        poses['referees'].append(pose)
+                        referee_idx += 1
                         
             except Exception as e:
                 print(f"Error during pose estimation: {e}")
                 poses['players'] = [None] * len(detections['players'])
                 poses['goalkeepers'] = [None] * len(detections['goalkeepers'])
+                poses['referees'] = [None] * len(detections['referees'])
         
-        # Segment players if enabled
-        if self.enable_segmentation and all_players:
-            segmentations = {'players': [], 'goalkeepers': []}
+        # Segment humans if enabled
+        if self.enable_segmentation and all_humans:
+            segmentations = {'players': [], 'goalkeepers': [], 'referees': []}
             
             try:
-                # Add padding to bounding boxes for better segmentation
-                padded_boxes = []
-                for box in all_players:
-                    x1, y1, x2, y2 = box
-                    
-                    # Add padding
-                    x1 = max(0, x1 - self.segmentation_padding)
-                    y1 = max(0, y1 - self.segmentation_padding)
-                    x2 = min(frame.shape[1], x2 + self.segmentation_padding)
-                    y2 = min(frame.shape[0], y2 + self.segmentation_padding)
-                    
-                    padded_boxes.append([x1, y1, x2, y2])
+                # Apply adaptive padding for segmentation (different from pose)
+                segmentation_base_padding = 30  # Default base padding for segmentation
+                segmentation_padding_ratio = 0.3  # Default padding ratio for segmentation
                 
-                # Run segmentation with padded boxes
-                seg_results = self.segmentation_detector.segment_boxes(frame, np.array(padded_boxes))
+                segmentation_padded_boxes = self._apply_adaptive_padding(
+                    np.array(all_humans),
+                    frame.shape,
+                    segmentation_base_padding,
+                    segmentation_padding_ratio
+                )
                 
-                # Organize segmentations by player type
+                # Run segmentation with adaptively padded boxes
+                seg_results = self.segmentation_detector.segment_boxes(frame, segmentation_padded_boxes)
+                
+                # Organize segmentations by human type
                 player_idx = 0
                 goalkeeper_idx = 0
+                referee_idx = 0
                 
-                for i, (mask, player_type) in enumerate(zip(seg_results, player_indices)):
-                    if player_type == 'player':
+                for i, (mask, human_type) in enumerate(zip(seg_results, human_indices)):
+                    if human_type == 'player':
                         segmentations['players'].append(mask)
                         player_idx += 1
-                    else:
+                    elif human_type == 'goalkeeper':
                         segmentations['goalkeepers'].append(mask)
                         goalkeeper_idx += 1
+                    else:  # referee
+                        segmentations['referees'].append(mask)
+                        referee_idx += 1
                         
             except Exception as e:
                 print(f"Error during segmentation: {e}")
                 segmentations['players'] = [None] * len(detections['players'])
                 segmentations['goalkeepers'] = [None] * len(detections['goalkeepers'])
+                segmentations['referees'] = [None] * len(detections['referees'])
         
         return detections, poses, segmentations
     

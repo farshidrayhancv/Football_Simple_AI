@@ -1,4 +1,4 @@
-"""Frame processing module with standardized resolution support."""
+"""Frame processing module with standardized resolution and adaptive padding support."""
 
 import cv2
 import numpy as np
@@ -142,15 +142,17 @@ class FrameProcessor:
         
         for category, detections in detections_dict.items():
             if isinstance(detections, sv.Detections) and len(detections) > 0:
+                # Create a new Detections object with copied arrays instead of detections.copy()
+                scaled_dict[category] = sv.Detections(
+                    xyxy=detections.xyxy.copy(),
+                    confidence=detections.confidence.copy() if detections.confidence is not None else None,
+                    class_id=detections.class_id.copy() if detections.class_id is not None else None,
+                    tracker_id=detections.tracker_id.copy() if detections.tracker_id is not None else None
+                )
                 
-                # TODO: Copy doesnt work. Using the original detections for now
-                # scaled_detections = detections.copy()
-                scaled_detections = detections
-
                 # Scale bounding boxes
-                scaled_detections.xyxy[:, [0, 2]] *= scale_x
-                scaled_detections.xyxy[:, [1, 3]] *= scale_y
-                scaled_dict[category] = scaled_detections
+                scaled_dict[category].xyxy[:, [0, 2]] *= scale_x
+                scaled_dict[category].xyxy[:, [1, 3]] *= scale_y
             else:
                 scaled_dict[category] = detections
         
@@ -164,7 +166,7 @@ class FrameProcessor:
         scale_x, scale_y = scale_factor
         scaled_poses = {}
         
-        for category in ['players', 'goalkeepers']:
+        for category in poses.keys():
             if category in poses:
                 scaled_category = []
                 for pose in poses[category]:
@@ -192,7 +194,7 @@ class FrameProcessor:
         scaled_segmentations = {}
         original_height, original_width = original_size
         
-        for category in ['players', 'goalkeepers']:
+        for category in segmentations.keys():
             if category in segmentations:
                 scaled_category = []
                 for mask in segmentations[category]:
@@ -254,14 +256,16 @@ class FrameProcessor:
         # Count detected poses
         player_poses_detected = sum(1 for p in poses.get('players', []) if p is not None)
         goalkeeper_poses_detected = sum(1 for p in poses.get('goalkeepers', []) if p is not None)
+        referee_poses_detected = sum(1 for p in poses.get('referees', []) if p is not None)
         
         stats['player_poses'] = player_poses_detected
         stats['goalkeeper_poses'] = goalkeeper_poses_detected
-        stats['total_poses'] = player_poses_detected + goalkeeper_poses_detected
+        stats['referee_poses'] = referee_poses_detected
+        stats['total_poses'] = player_poses_detected + goalkeeper_poses_detected + referee_poses_detected
         
         # Calculate average pose confidence if available
         all_confidences = []
-        for category in ['players', 'goalkeepers']:
+        for category in poses.keys():
             if category in poses:
                 for pose in poses[category]:
                     if pose and 'confidence' in pose:
@@ -279,14 +283,16 @@ class FrameProcessor:
         # Count detected segmentations
         player_segs_detected = sum(1 for s in segmentations.get('players', []) if s is not None)
         goalkeeper_segs_detected = sum(1 for s in segmentations.get('goalkeepers', []) if s is not None)
+        referee_segs_detected = sum(1 for s in segmentations.get('referees', []) if s is not None)
         
         stats['player_segments'] = player_segs_detected
         stats['goalkeeper_segments'] = goalkeeper_segs_detected
-        stats['total_segments'] = player_segs_detected + goalkeeper_segs_detected
+        stats['referee_segments'] = referee_segs_detected
+        stats['total_segments'] = player_segs_detected + goalkeeper_segs_detected + referee_segs_detected
         
         # Calculate average mask size if available
         mask_sizes = []
-        for category in ['players', 'goalkeepers']:
+        for category in segmentations.keys():
             if category in segmentations:
                 for mask in segmentations[category]:
                     if mask is not None and isinstance(mask, np.ndarray):
