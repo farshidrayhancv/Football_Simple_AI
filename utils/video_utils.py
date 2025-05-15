@@ -1,4 +1,4 @@
-"""Video processing utilities with pose, segmentation, and SAHI support."""
+"""Video processing utilities with standardized resolution support."""
 
 import cv2
 import numpy as np
@@ -10,6 +10,7 @@ from tqdm import tqdm
 class VideoProcessor:
     def __init__(self, config):
         self.config = config
+        self.processing_resolution = config.get('processing', {}).get('resolution', None)
     
     def collect_player_crops(self, video_path, detector, stride):
         """Collect player crops from video for training."""
@@ -27,8 +28,25 @@ class VideoProcessor:
                 break
             
             if frame_count % stride == 0:
-                players = detector.detect_players_only(frame)
+                # Resize frame if processing resolution is set
+                if self.processing_resolution:
+                    processing_frame = cv2.resize(frame, tuple(self.processing_resolution))
+                    scale_x = frame.shape[1] / self.processing_resolution[0]
+                    scale_y = frame.shape[0] / self.processing_resolution[1]
+                else:
+                    processing_frame = frame
+                    scale_x = scale_y = 1.0
+                
+                # Detect players on processing frame
+                players = detector.detect_players_only(processing_frame)
+                
                 if len(players) > 0:
+                    # Scale detections back to original resolution
+                    if scale_x != 1.0 or scale_y != 1.0:
+                        players.xyxy[:, [0, 2]] *= scale_x
+                        players.xyxy[:, [1, 3]] *= scale_y
+                    
+                    # Extract crops from original frame
                     player_crops = [sv.crop_image(frame, xyxy) for xyxy in players.xyxy]
                     crops.extend(player_crops)
                 pbar.update(1)
@@ -57,6 +75,11 @@ class VideoProcessor:
         if output_path is None:
             base_name = os.path.splitext(os.path.basename(video_path))[0]
             output_suffix = "_football_ai"
+            
+            # Add processing resolution to filename
+            if self.processing_resolution:
+                output_suffix += f"_{self.processing_resolution[0]}x{self.processing_resolution[1]}"
+            
             if self.config.get('sahi', {}).get('enable', False):
                 output_suffix += "_sahi"
             if self.config.get('display', {}).get('show_pose', False):
@@ -73,15 +96,20 @@ class VideoProcessor:
         
         # Processing description
         features = []
+        if self.processing_resolution:
+            features.append(f"resolution: {self.processing_resolution[0]}x{self.processing_resolution[1]}")
         if self.config.get('sahi', {}).get('enable', False):
             features.append("SAHI")
         if self.config.get('display', {}).get('show_pose', False):
-            features.append("pose estimation")
+            features.append("pose")
         if self.config.get('display', {}).get('show_segmentation', False):
             features.append("segmentation")
         
         features_str = " with " + ", ".join(features) if features else ""
         print(f"Processing {total_frames} frames{features_str}...")
+        print(f"Original resolution: {width}x{height}")
+        if self.processing_resolution:
+            print(f"Processing resolution: {self.processing_resolution[0]}x{self.processing_resolution[1]}")
         
         # Process frames
         with tqdm(total=total_frames, desc="Processing frames") as pbar:
@@ -92,10 +120,10 @@ class VideoProcessor:
                 if not ret:
                     break
                 
-                # Process frame with all features
+                # Process frame (frame processor handles resolution internally)
                 results = frame_processor.process_frame(frame)
                 
-                # Unpack results (now includes SAHI stats)
+                # Unpack results
                 if len(results) == 7:
                     detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats = results
                 else:
@@ -112,6 +140,9 @@ class VideoProcessor:
                     annotated_frame = annotator.annotate_frame_with_pose(frame, detections, poses)
                 else:
                     annotated_frame = annotator.annotate_frame(frame, detections)
+                
+                # Add resolution info
+                annotated_frame = self._draw_resolution_info(annotated_frame, frame)
                 
                 # Add statistics to frame
                 stats = {
@@ -155,6 +186,25 @@ class VideoProcessor:
         out.release()
         
         print(f"Processing complete! Output saved to: {output_path}")
+    
+    def _draw_resolution_info(self, frame, original_frame):
+        """Draw resolution information on frame."""
+        y_offset = frame.shape[0] - 60
+        x_offset = 10
+        
+        # Original resolution
+        orig_h, orig_w = original_frame.shape[:2]
+        cv2.putText(frame, f"Original: {orig_w}x{orig_h}", (x_offset, y_offset),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        # Processing resolution
+        if self.processing_resolution:
+            y_offset += 25
+            proc_w, proc_h = self.processing_resolution
+            cv2.putText(frame, f"Processing: {proc_w}x{proc_h}", (x_offset, y_offset),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        return frame
     
     def _draw_sahi_info(self, frame, sahi_stats):
         """Draw SAHI information on frame."""
@@ -207,12 +257,14 @@ class VideoProcessor:
         
         # Add labels
         label = "Original"
+        if self.processing_resolution:
+            label += f" (proc: {self.processing_resolution[0]}x{self.processing_resolution[1]})"
         if self.config.get('sahi', {}).get('enable', False):
             label += " + SAHI"
         if self.config.get('display', {}).get('show_pose', False):
             label += " + Pose"
         if self.config.get('display', {}).get('show_segmentation', False):
-            label += " + Segmentation"
+            label += " + Seg"
         
         cv2.putText(combined, label, (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)

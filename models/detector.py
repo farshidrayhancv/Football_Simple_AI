@@ -376,6 +376,7 @@ class FieldDetector:
         """Detect field keypoints."""
         result = self.model.infer(
             frame,
-            confidence=self.confidence_threshold
+            confidence=self.confidence_threshold,
+
         )[0]
         return sv.KeyPoints.from_inference(result)

@@ -1,4 +1,4 @@
-"""Frame processing module with pose, segmentation, and SAHI support."""
+"""Frame processing module with standardized resolution support."""
 
 import cv2
 import numpy as np
@@ -24,13 +24,33 @@ class FrameProcessor:
         self.enable_pose = config.get('display', {}).get('show_pose', True)
         self.enable_segmentation = config.get('display', {}).get('show_segmentation', True)
         self.enable_sahi = config.get('sahi', {}).get('enable', False)
+        
+        # Processing resolution
+        self.processing_resolution = config.get('processing', {}).get('resolution', None)
+        if self.processing_resolution:
+            self.processing_width = self.processing_resolution[0]
+            self.processing_height = self.processing_resolution[1]
+            print(f"Processing resolution set to: {self.processing_width}x{self.processing_height}")
     
     def process_frame(self, frame):
-        """Process a single frame with SAHI, pose estimation and segmentation."""
+        """Process a single frame at standardized resolution."""
+        original_height, original_width = frame.shape[:2]
+        
+        # Resize frame to processing resolution if specified
+        scale_factor = 1.0
+        if self.processing_resolution:
+            processing_frame = cv2.resize(frame, (self.processing_width, self.processing_height))
+            scale_x = original_width / self.processing_width
+            scale_y = original_height / self.processing_height
+            scale_factor = (scale_x, scale_y)
+        else:
+            processing_frame = frame
+            scale_factor = (1.0, 1.0)
+        
         # Process with SAHI if enabled
         if self.enable_sahi:
             detections_dict, poses, segmentations = self.sahi_processor.process_with_sahi(
-                frame, 
+                processing_frame, 
                 self.player_detector,
                 self.enable_pose,
                 self.enable_segmentation
@@ -38,13 +58,20 @@ class FrameProcessor:
         else:
             # Use standard processing
             if hasattr(self.player_detector, 'detect_with_pose_and_segmentation'):
-                detections_dict, poses, segmentations = self.player_detector.detect_with_pose_and_segmentation(frame)
+                detections_dict, poses, segmentations = self.player_detector.detect_with_pose_and_segmentation(processing_frame)
             else:
                 # Fallback to basic detection
-                result = self.player_detector.detect_categories(frame)
+                result = self.player_detector.detect_categories(processing_frame)
                 detections_dict = result
                 poses = None
                 segmentations = None
+        
+        # Scale detections back to original resolution
+        if scale_factor != (1.0, 1.0):
+            detections_dict = self._scale_detections_dict(detections_dict, scale_factor)
+            poses = self._scale_poses(poses, scale_factor)
+            segmentations = self._scale_segmentations(segmentations, scale_factor, 
+                                                    (original_height, original_width))
         
         # Get all detections
         all_detections = self._merge_all_detections(detections_dict)
@@ -67,7 +94,7 @@ class FrameProcessor:
         players = non_ball_detections[non_ball_detections.class_id == self.player_detector.PLAYER_ID]
         referees = non_ball_detections[non_ball_detections.class_id == self.player_detector.REFEREE_ID]
         
-        # Team assignment
+        # Team assignment (use original frame for crops)
         if len(players) > 0:
             players = self._assign_teams(frame, players)
             
@@ -82,7 +109,7 @@ class FrameProcessor:
             'referees': referees
         }
         
-        # Field detection and transformation
+        # Field detection and transformation (use original frame)
         transformer = self._update_field_transformation(frame)
         
         # Update ball trail
@@ -107,6 +134,79 @@ class FrameProcessor:
             sahi_stats = self._calculate_sahi_stats(detections)
         
         return detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats
+    
+    def _scale_detections_dict(self, detections_dict, scale_factor):
+        """Scale all detections back to original resolution."""
+        scale_x, scale_y = scale_factor
+        scaled_dict = {}
+        
+        for category, detections in detections_dict.items():
+            if isinstance(detections, sv.Detections) and len(detections) > 0:
+                
+                # TODO: Copy doesnt work. Using the original detections for now
+                # scaled_detections = detections.copy()
+                scaled_detections = detections
+
+                # Scale bounding boxes
+                scaled_detections.xyxy[:, [0, 2]] *= scale_x
+                scaled_detections.xyxy[:, [1, 3]] *= scale_y
+                scaled_dict[category] = scaled_detections
+            else:
+                scaled_dict[category] = detections
+        
+        return scaled_dict
+    
+    def _scale_poses(self, poses, scale_factor):
+        """Scale pose keypoints back to original resolution."""
+        if poses is None:
+            return None
+        
+        scale_x, scale_y = scale_factor
+        scaled_poses = {}
+        
+        for category in ['players', 'goalkeepers']:
+            if category in poses:
+                scaled_category = []
+                for pose in poses[category]:
+                    if pose is not None:
+                        scaled_pose = pose.copy()
+                        # Scale keypoints
+                        scaled_pose['keypoints'][:, 0] *= scale_x
+                        scaled_pose['keypoints'][:, 1] *= scale_y
+                        # Scale bbox if present
+                        if 'bbox' in scaled_pose and scaled_pose['bbox'] is not None:
+                            scaled_pose['bbox'][[0, 2]] *= scale_x
+                            scaled_pose['bbox'][[1, 3]] *= scale_y
+                        scaled_category.append(scaled_pose)
+                    else:
+                        scaled_category.append(None)
+                scaled_poses[category] = scaled_category
+        
+        return scaled_poses
+    
+    def _scale_segmentations(self, segmentations, scale_factor, original_size):
+        """Scale segmentation masks back to original resolution."""
+        if segmentations is None:
+            return None
+        
+        scaled_segmentations = {}
+        original_height, original_width = original_size
+        
+        for category in ['players', 'goalkeepers']:
+            if category in segmentations:
+                scaled_category = []
+                for mask in segmentations[category]:
+                    if mask is not None and isinstance(mask, np.ndarray):
+                        # Resize mask to original dimensions
+                        scaled_mask = cv2.resize(mask.astype(np.uint8), 
+                                               (original_width, original_height),
+                                               interpolation=cv2.INTER_NEAREST)
+                        scaled_category.append(scaled_mask.astype(bool))
+                    else:
+                        scaled_category.append(None)
+                scaled_segmentations[category] = scaled_category
+        
+        return scaled_segmentations
     
     def _merge_all_detections(self, detections_dict):
         """Merge all category detections."""
@@ -197,6 +297,7 @@ class FrameProcessor:
         
         return stats
     
+
     def _calculate_sahi_stats(self, detections):
         """Calculate SAHI statistics."""
         stats = {}

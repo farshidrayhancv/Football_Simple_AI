@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main Football AI Application with Pose Estimation and Segmentation
+Main Football AI Application with Processing Resolution Support
 """
 
 import argparse
@@ -23,6 +23,13 @@ class FootballAI:
         """Initialize Football AI with configuration."""
         # Load configuration
         self.config = ConfigLoader(config_path).config
+        
+        # Show processing resolution if set
+        processing_res = self.config.get('processing', {}).get('resolution', None)
+        if processing_res:
+            print(f"Processing resolution configured: {processing_res[0]}x{processing_res[1]}")
+        else:
+            print("Processing at native resolution")
         
         # Initialize all components
         self._init_models()
@@ -114,7 +121,20 @@ class FootballAI:
             raise FileNotFoundError(f"Video file not found: {video_path}")
         
         print(f"Processing video: {video_path}")
-        print(f"Segmentation padding: {self.config.get('detection', {}).get('segmentation_padding', 15)} pixels")
+        
+        # Show configuration summary
+        print("\nConfiguration Summary:")
+        print(f"  SAHI: {'Enabled' if self.config.get('sahi', {}).get('enable', False) else 'Disabled'}")
+        print(f"  Pose Estimation: {'Enabled' if self.config.get('display', {}).get('show_pose', False) else 'Disabled'}")
+        print(f"  Segmentation: {'Enabled' if self.config.get('display', {}).get('show_segmentation', False) else 'Disabled'}")
+        
+        processing_res = self.config.get('processing', {}).get('resolution', None)
+        if processing_res:
+            print(f"  Processing Resolution: {processing_res[0]}x{processing_res[1]}")
+        else:
+            print(f"  Processing Resolution: Native")
+        
+        print("")  # Empty line
         
         # Train team classifier
         self.train_team_classifier(video_path)
@@ -131,7 +151,7 @@ class FootballAI:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Football AI Demo with Pose and Segmentation')
+    parser = argparse.ArgumentParser(description='Football AI Demo')
     parser.add_argument('--config', type=str, required=True,
                       help='Path to config file')
     parser.add_argument('--output', type=str, default=None,
