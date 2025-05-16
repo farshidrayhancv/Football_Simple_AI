@@ -6,7 +6,7 @@ import supervision as sv
 
 
 class PlayerPossessionDetector:
-    def __init__(self, proximity_threshold=50, possession_frames=3, possession_duration=10):
+    def __init__(self, proximity_threshold=50, possession_frames=3, possession_duration=3):
         """Initialize player possession detector.
         
         Args:
