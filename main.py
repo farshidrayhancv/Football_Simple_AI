@@ -92,14 +92,17 @@ class FootballAI:
         if self.config.get('possession_detection', {}).get('enable', True):
             print("Initializing player possession detector")
             self.possession_detector = PlayerPossessionDetector(
-                proximity_threshold=self.config.get('possession_detection', {}).get('proximity_threshold', 150),
+                proximity_threshold=self.config.get('possession_detection', {}).get('proximity_threshold', 50),
                 possession_frames=self.config.get('possession_detection', {}).get('possession_frames', 3),
-                possession_duration=self.config.get('possession_duration', {}).get('possession_duration', 3)
+                possession_duration=self.config.get('possession_detection', {}).get('possession_duration', 3),
+                no_possession_frames=self.config.get('possession_detection', {}).get('no_possession_frames', 10)
             )
         else:
             print("Player possession detection disabled in config")
             self.possession_detector = None
-    
+            self.config['possession_detection']['enable'] = False    
+
+            
     def _init_processors(self):
         """Initialize processors."""
         self.frame_processor = FrameProcessor(

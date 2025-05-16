@@ -6,7 +6,7 @@ import supervision as sv
 
 
 class PlayerPossessionDetector:
-    def __init__(self, proximity_threshold=50, possession_frames=3, possession_duration=3):
+    def __init__(self, proximity_threshold=50, possession_frames=3, possession_duration=10, no_possession_frames=10):
         """Initialize player possession detector.
         
         Args:
@@ -14,12 +14,14 @@ class PlayerPossessionDetector:
             possession_frames: Number of frames a player needs to be closest to be considered for possession
             possession_duration: Minimum duration (in frames) a player must maintain possession
                                  to filter out false positives during passes
+            no_possession_frames: Number of frames the ball has to be alone to consider no possession
         """
         # For pitch coordinates, we need a much larger threshold
         # Multiplying by 20 because pitch coordinates are in a much larger scale
         self.proximity_threshold = proximity_threshold 
         self.possession_frames = possession_frames
         self.possession_duration = possession_duration
+        self.no_possession_frames = no_possession_frames
         
         # Possession tracking
         self.current_possession = None  # player_id
@@ -27,13 +29,14 @@ class PlayerPossessionDetector:
         self.closest_candidate = None  # Temporary tracking of closest player
         self.candidate_counter = 0  # Counter to track consecutive frames with same player closest
         self.possession_timer = 0  # Duration counter for confirmed possession
+        self.ball_alone_counter = 0  # Counter for how many frames the ball has been alone
         
         # Keep track of recent proximity changes
         self.previous_closest_players = []  # List of recently close players
         self.player_proximity_durations = {}  # Track how long each player has been close to ball
         
         print(f"PlayerPossessionDetector initialized with threshold={self.proximity_threshold} (for pitch coordinates), "
-              f"frames={possession_frames}, duration={possession_duration}")
+              f"frames={possession_frames}, duration={possession_duration}, no_possession={no_possession_frames}")
     
     def update(self, detections, ball_position):
         """Update possession detection based on current detections.
@@ -56,29 +59,31 @@ class PlayerPossessionDetector:
         # Find the closest player to the ball
         closest_player = self._find_closest_player(detections, ball_position)
         
-        # If no player is close enough, no one has proximity
+        # If no player is close enough, increment ball_alone_counter
         if closest_player is None:
             self.candidate_counter = 0
             self.closest_candidate = None
+            self.ball_alone_counter += 1
             
-            # Decrement possession timer when ball is far from all players
-            if self.possession_timer > 0:
-                self.possession_timer -= 1
-                
-                # Clear possession if timer expires
-                if self.possession_timer == 0:
+            # Clear possession if ball has been alone for too long
+            if self.ball_alone_counter >= self.no_possession_frames:
+                if self.current_possession is not None:
+                    print(f"Possession cleared: ball alone for {self.ball_alone_counter} frames")
                     self.current_possession = None
                     self.current_team = None
-                    print("Possession cleared: no player close to ball")
-            
+                
             # Clear all player proximity durations
             self.player_proximity_durations = {}
                 
             return {
                 'player_id': self.current_possession,
                 'team_id': self.current_team,
-                'status': 'no_player_close'
+                'status': f'no_player_close (alone for {self.ball_alone_counter} frames)',
+                'ball_alone_counter': self.ball_alone_counter
             }
+        
+        # Reset ball_alone_counter since a player is close to the ball
+        self.ball_alone_counter = 0
         
         # Get player details
         team_id, player_id, distance = closest_player
@@ -135,7 +140,8 @@ class PlayerPossessionDetector:
             'proximity_player': player_id,
             'proximity_duration': self.player_proximity_durations.get(player_id, 0),
             'candidate_counter': self.candidate_counter,
-            'possession_timer': self.possession_timer
+            'possession_timer': self.possession_timer,
+            'ball_alone_counter': self.ball_alone_counter
         }
     
     def _find_closest_player(self, detections, ball_position):
@@ -254,7 +260,7 @@ class PlayerPossessionDetector:
         
         # Create semi-transparent overlay for stats panel
         height, width = vis_frame.shape[:2]
-        panel_height = 200
+        panel_height = 220
         panel_width = 300
         panel_x = width - panel_width - 10
         panel_y = 10
@@ -289,6 +295,11 @@ class PlayerPossessionDetector:
         y_offset += 25
         
         cv2.putText(vis_frame, f"Pos timer: {self.possession_timer}/{self.possession_duration}", 
+                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
+        
+        # Add ball alone counter
+        cv2.putText(vis_frame, f"Ball alone: {self.ball_alone_counter}/{self.no_possession_frames}", 
                    (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
         y_offset += 25
         

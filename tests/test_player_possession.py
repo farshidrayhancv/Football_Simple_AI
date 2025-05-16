@@ -45,11 +45,22 @@ def test_player_possession(config_path, video_path):
     # Initialize possession detector with configurable parameters
     proximity_threshold = config.get('possession_detection', {}).get('proximity_threshold', 50)
     possession_frames = config.get('possession_detection', {}).get('possession_frames', 3)
-    
-    print(f"Initializing possession detector with threshold={proximity_threshold}, frames={possession_frames}")
+    possession_duration = config.get('possession_detection', {}).get('possession_duration', 3)
+    no_possession_frames = config.get('possession_detection', {}).get('no_possession_frames', 10)
+
+    print(f"Initializing possession detector with threshold={proximity_threshold}, frames={possession_frames}, "
+        f"duration={possession_duration}, no_possession={no_possession_frames}")
     possession_detector = PlayerPossessionDetector(
         proximity_threshold=proximity_threshold,
-        possession_frames=possession_frames
+        possession_frames=possession_frames,
+        possession_duration=possession_duration,
+        no_possession_frames=no_possession_frames
+    )
+    # Initialize video view transformer
+    view_transformer = ViewTransformer(
+        width=config['view']['width'],
+        height=config['view']['height'],
+        device=config['performance']['device']
     )
     
     # Open video
