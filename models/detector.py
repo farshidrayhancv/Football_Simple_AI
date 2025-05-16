@@ -54,7 +54,7 @@ class ObjectDetector:
 
 
 class PoseDetector:
-    def __init__(self, model_name='yolov8n-pose.pt', device='cpu'):
+    def __init__(self, model_name='yolo11n-pose.pt', device='cpu'):
         """Initialize pose detector with YOLO pose model."""
         try:
             self.model = YOLO(model_name).to(device)
@@ -81,9 +81,19 @@ class PoseDetector:
         ]
     
     def detect_poses(self, frame, boxes=None):
-        """Detect poses in frame or within specific boxes."""
-        if boxes is None:
-            # Run on full frame
+        """Detect poses in frame or within specific boxes.
+        
+        Args:
+            frame: The frame to analyze
+            boxes: Bounding boxes to analyze. If None, analyze whole frame (not recommended)
+        
+        Returns:
+            List of pose data
+        """
+        if boxes is None or len(boxes) == 0:
+            # We should avoid running on full frame for performance,
+            # but keep this as a fallback
+            print("Warning: Running pose detection on full frame is inefficient")
             try:
                 results = self.model(frame, verbose=False, device=self.device)
                 return self._process_results(results, frame.shape[:2])
@@ -91,7 +101,7 @@ class PoseDetector:
                 print(f"Pose detection error on full frame: {e}")
                 return []
         else:
-            # Run on cropped regions
+            # Run on cropped regions (recommended approach)
             all_poses = []
             for box in boxes:
                 x1, y1, x2, y2 = box.astype(int)
@@ -214,7 +224,15 @@ class SegmentationDetector:
             self.model = None
     
     def segment_boxes(self, frame, boxes):
-        """Segment objects within bounding boxes using improved foreground/background point prompts."""
+        """Segment objects within bounding boxes using simple center-point prompts.
+        
+        Args:
+            frame: The full frame
+            boxes: List of bounding boxes to segment
+            
+        Returns:
+            List of segmentation masks
+        """
         if self.model is None or len(boxes) == 0:
             return []
         
@@ -225,58 +243,53 @@ class SegmentationDetector:
             # Create results list
             masks = []
             
-            # Process each box individually with refined foreground/background prompts
+            # Process each box individually with simple foreground/background prompts
             for box in boxes_list:
                 x1, y1, x2, y2 = map(int, box)
                 
-                # Box dimensions
-                width = x2 - x1
-                height = y2 - y1
-                
-                # Calculate more reliable foreground points (player's body)
+                # Very simple strategy: center point is foreground, corners are background
                 center_x = (x1 + x2) // 2
                 center_y = (y1 + y2) // 2
                 
-                # More foreground points on the player's body
-                fg_points = [
-                    [center_x, center_y],                  # Center
-                    [center_x, center_y - height//4],      # Upper torso
-                    [center_x, center_y + height//4]       # Lower torso
-                ]
+                # Single foreground point (center of box)
+                fg_points = [[center_x, center_y]]
                 
-                # Background points further away from the box, to ensure they're truly background
-                bg_distance = max(10, min(width, height) // 8)  # Adaptive distance based on box size
+                # Four background points (outside the box)
+                # Make sure they're not too far to avoid segmenting other objects
+                margin = min((x2 - x1), (y2 - y1)) // 10  # 10% of box size
                 bg_points = [
-                    [max(0, x1 - bg_distance), max(0, y1 - bg_distance)],       # Top-left
-                    [min(frame.shape[1], x2 + bg_distance), max(0, y1 - bg_distance)],  # Top-right
-                    [max(0, x1 - bg_distance), min(frame.shape[0], y2 + bg_distance)],  # Bottom-left
-                    [min(frame.shape[1], x2 + bg_distance), min(frame.shape[0], y2 + bg_distance)]  # Bottom-right
+                    [max(0, x1 - margin), max(0, y1 - margin)],              # Top-left
+                    [min(frame.shape[1] - 1, x2 + margin), max(0, y1 - margin)],  # Top-right
+                    [max(0, x1 - margin), min(frame.shape[0] - 1, y2 + margin)],  # Bottom-left
+                    [min(frame.shape[1] - 1, x2 + margin), min(frame.shape[0] - 1, y2 + margin)]  # Bottom-right
                 ]
                 
-                # Combine all points
+                # Combine points
                 all_points = fg_points + bg_points
-                
-                # Create corresponding labels (1=foreground, 0=background)
                 all_labels = [1] * len(fg_points) + [0] * len(bg_points)
                 
-                # Run SAM with box and point prompts
-                result = self.model(
-                    frame,
-                    bboxes=[box],
-                    points=[all_points],
-                    labels=[all_labels],
-                    verbose=False,
-                    device=self.device
-                )
-                
-                # Extract mask
-                if result and result[0].masks is not None:
-                    mask_data = result[0].masks.data.cpu().numpy()
-                    if mask_data.ndim >= 2 and mask_data.shape[0] > 0:
-                        masks.append(mask_data[0])  # Take first mask
+                # Run SAM with box and simple point prompts
+                try:
+                    result = self.model(
+                        frame,
+                        bboxes=[box],
+                        points=[all_points],
+                        labels=[all_labels],
+                        verbose=False,
+                        device=self.device
+                    )
+                    
+                    # Extract mask
+                    if result and result[0].masks is not None:
+                        mask_data = result[0].masks.data.cpu().numpy()
+                        if mask_data.ndim >= 2 and mask_data.shape[0] > 0:
+                            masks.append(mask_data[0])  # Take first mask
+                        else:
+                            masks.append(None)
                     else:
                         masks.append(None)
-                else:
+                except Exception as e:
+                    print(f"Error segmenting box {box}: {e}")
                     masks.append(None)
             
             return masks
@@ -284,9 +297,9 @@ class SegmentationDetector:
         except Exception as e:
             print(f"Segmentation error: {e}")
             return [None] * len(boxes)
-            
+    
     def debug_segment_box(self, image, box):
-        """Debug version with point prompts for better player segmentation."""
+        """Debug version with simpler point prompts for player segmentation."""
         if self.model is None:
             return None, image
         
@@ -295,60 +308,59 @@ class SegmentationDetector:
             box_list = box.tolist() if isinstance(box, np.ndarray) else box
             x1, y1, x2, y2 = map(int, box_list)
             
-            # Calculate center point of the box as a foreground point
+            # Very simple strategy: center point is foreground, corners are background
             center_x = (x1 + x2) // 2
             center_y = (y1 + y2) // 2
             
-            # Create combined point list (all points in a single list)
-            all_points = [
-                # Foreground points (player's body)
-                [center_x, center_y],          # Center
-                [center_x, center_y - (y2-y1)//4],  # Upper torso
-                
-                # Background points (corners of box)
-                [x1 + 5, y1 + 5],             # Top-left
-                [x2 - 5, y1 + 5],             # Top-right
-                [x1 + 5, y2 - 5],             # Bottom-left
-                [x2 - 5, y2 - 5]              # Bottom-right
+            # Single foreground point (center of box)
+            fg_points = [[center_x, center_y]]
+            
+            # Four background points (outside the box)
+            margin = min((x2 - x1), (y2 - y1)) // 10  # 10% of box size
+            bg_points = [
+                [max(0, x1 - margin), max(0, y1 - margin)],              # Top-left
+                [min(image.shape[1] - 1, x2 + margin), max(0, y1 - margin)],  # Top-right
+                [max(0, x1 - margin), min(image.shape[0] - 1, y2 + margin)],  # Bottom-left
+                [min(image.shape[1] - 1, x2 + margin), min(image.shape[0] - 1, y2 + margin)]  # Bottom-right
             ]
             
-            # Create corresponding labels (1=foreground, 0=background)
-            all_labels = [1, 1, 0, 0, 0, 0]  # First 2 are fg, rest are bg
+            # Combine points
+            all_points = fg_points + bg_points
+            all_labels = [1] * len(fg_points) + [0] * len(bg_points)
             
-            # Run SAM with box and point prompts
+            # Run SAM with box and simple point prompts
             result = self.model(
                 image,
                 bboxes=[box_list],
-                points=[all_points],  # Single list of points
-                labels=[all_labels],  # Single list of labels
+                points=[all_points],
+                labels=[all_labels],
                 verbose=False,
                 device=self.device
             )
             
-            # Extract mask - Fixed index error here
+            # Extract mask
             mask = None
             if result and result[0].masks is not None:
                 mask_data = result[0].masks.data.cpu().numpy()
                 if mask_data.ndim >= 2 and mask_data.shape[0] > 0:
-                    mask = mask_data[0]  # Changed from index 1 to index 0
+                    mask = mask_data[0]
             
             # Visualize result for debugging
             vis_image = image.copy()
             if mask is not None:
-                vis_image[mask > 0.5] = vis_image[mask > 0.5] * 0.7 + np.array([0, 0, 255]) * 0.3
+                mask_bool = mask > 0.5
+                vis_image[mask_bool] = vis_image[mask_bool] * 0.7 + np.array([0, 0, 255]) * 0.3
                 
-            # Draw box and points
+            # Draw box
             cv2.rectangle(vis_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
             # Draw foreground points
-            for i in range(2):  # First 2 points are foreground
-                px, py = all_points[i]
-                cv2.circle(vis_image, (px, py), 5, (0, 255, 0), -1)  # Green
+            for px, py in fg_points:
+                cv2.circle(vis_image, (px, py), 5, (0, 255, 0), -1)  # Green for foreground
                 
             # Draw background points
-            for i in range(2, 6):  # Last 4 points are background
-                px, py = all_points[i]
-                cv2.circle(vis_image, (px, py), 5, (0, 0, 255), -1)  # Red
+            for px, py in bg_points:
+                cv2.circle(vis_image, (px, py), 5, (0, 0, 255), -1)  # Red for background
                 
             return mask, vis_image
                 
@@ -356,19 +368,18 @@ class SegmentationDetector:
             print(f"Debug segmentation error: {e}")
             return None, image
 
-
 class EnhancedObjectDetector(ObjectDetector):
     """Object detector with integrated pose estimation and segmentation."""
     
     def __init__(self, model_id, api_key, confidence_threshold=0.5, 
-                 enable_pose=True, pose_model='yolo11n-pose.pt',
+                 enable_pose=True, pose_model='yolo11m-pose.pt',
                  enable_segmentation=True, sam_model='sam2.1_s.pt', 
-                 segmentation_padding=15, device='cpu'):
+                 padding_ratio=0.1, device='cpu'):
         super().__init__(model_id, api_key, confidence_threshold)
         
         self.enable_pose = enable_pose
         self.enable_segmentation = enable_segmentation
-        self.segmentation_padding = segmentation_padding  # Legacy padding parameter
+        self.padding_ratio = padding_ratio  # Consistent padding ratio for both pose and segmentation
         self.device = device
         
         if self.enable_pose:
@@ -385,14 +396,13 @@ class EnhancedObjectDetector(ObjectDetector):
                 print(f"Failed to initialize segmentation detector: {e}")
                 self.enable_segmentation = False
     
-    def _apply_adaptive_padding(self, boxes, frame_shape, base_padding, padding_ratio):
-        """Apply adaptive padding to bounding boxes based on their size.
+    def _apply_padding(self, boxes, frame_shape, padding_ratio=0.1):
+        """Apply percentage-based padding to bounding boxes.
         
         Args:
             boxes: Array of bounding boxes in xyxy format
             frame_shape: Shape of the frame (height, width)
-            base_padding: Base padding in pixels
-            padding_ratio: Scaling factor for adaptive component
+            padding_ratio: Ratio of box size to add as padding (e.g., 0.1 = 10%)
             
         Returns:
             Array of padded boxes
@@ -405,130 +415,72 @@ class EnhancedObjectDetector(ObjectDetector):
             box_width = x2 - x1
             box_height = y2 - y1
             
-            # Smaller boxes get more padding (distant players)
-            # Normalize box size relative to frame size
-            size_factor = 1.0 / (box_width * box_height / (width * height) + 0.1)
-            adaptive_padding = base_padding * (1 + padding_ratio * size_factor)
+            # Calculate padding based on percentage of box dimensions
+            pad_x = int(box_width * padding_ratio)
+            pad_y = int(box_height * padding_ratio)
             
             # Apply padding with bounds checking
-            x1 = max(0, x1 - adaptive_padding)
-            y1 = max(0, y1 - adaptive_padding)
-            x2 = min(width, x2 + adaptive_padding)
-            y2 = min(height, y2 + adaptive_padding)
+            x1 = max(0, x1 - pad_x)
+            y1 = max(0, y1 - pad_y)
+            x2 = min(width, x2 + pad_x)
+            y2 = min(height, y2 + pad_y)
             
             padded_boxes.append([x1, y1, x2, y2])
         
         return np.array(padded_boxes)
     
     def detect_with_pose_and_segmentation(self, frame):
-        """Detect objects, estimate poses, and segment players with adaptive padding."""
-        # Get standard detections
+        """Detect objects, estimate poses, and segment players with percentage-based padding.
+           This method follows a strict pipeline:
+           1. First detect all objects using base object detection
+           2. Apply percentage-based padding to human boxes
+           3. Run pose and segmentation ONLY on the padded boxes
+        """
+        # STEP 1: Get standard object detections first
         detections = self.detect_categories(frame)
         
         # Initialize outputs
-        poses = None
-        segmentations = None
+        poses = {'players': [], 'goalkeepers': [], 'referees': []}
+        segmentations = {'players': [], 'goalkeepers': [], 'referees': []}
         
-        # Combine players, goalkeepers, and referees for pose and segmentation
-        all_humans = []
-        human_indices = []
-        
-        # Add players
-        if len(detections['players']) > 0:
-            all_humans.extend(detections['players'].xyxy)
-            human_indices.extend(['player'] * len(detections['players']))
-        
-        # Add goalkeepers
-        if len(detections['goalkeepers']) > 0:
-            all_humans.extend(detections['goalkeepers'].xyxy)
-            human_indices.extend(['goalkeeper'] * len(detections['goalkeepers']))
+        # STEP 2: Process each category of humans separately
+        for category in ['players', 'goalkeepers', 'referees']:
+            # Skip if no detections in this category
+            if len(detections[category]) == 0:
+                continue
             
-        # Add referees - process ALL humans including referees
-        if len(detections['referees']) > 0:
-            all_humans.extend(detections['referees'].xyxy)
-            human_indices.extend(['referee'] * len(detections['referees']))
-        
-        # Estimate poses if enabled
-        if self.enable_pose and all_humans:
-            poses = {'players': [], 'goalkeepers': [], 'referees': []}
+            # Get boxes for this category
+            boxes = detections[category].xyxy
             
-            try:
-                # Apply adaptive padding for pose estimation
-                pose_base_padding = 50  # Default base padding for pose
-                pose_padding_ratio = 0.5  # Default padding ratio for pose
-                
-                pose_padded_boxes = self._apply_adaptive_padding(
-                    np.array(all_humans),
-                    frame.shape,
-                    pose_base_padding,
-                    pose_padding_ratio
-                )
-                
-                # Detect poses with adaptive padding
-                pose_results = self.pose_detector.detect_poses(frame, pose_padded_boxes)
-                
-                # Organize poses by human type
-                player_idx = 0
-                goalkeeper_idx = 0
-                referee_idx = 0
-                
-                for i, (pose, human_type) in enumerate(zip(pose_results, human_indices)):
-                    if human_type == 'player':
-                        poses['players'].append(pose)
-                        player_idx += 1
-                    elif human_type == 'goalkeeper':
-                        poses['goalkeepers'].append(pose)
-                        goalkeeper_idx += 1
-                    else:  # referee
-                        poses['referees'].append(pose)
-                        referee_idx += 1
-                        
-            except Exception as e:
-                print(f"Error during pose estimation: {e}")
-                poses['players'] = [None] * len(detections['players'])
-                poses['goalkeepers'] = [None] * len(detections['goalkeepers'])
-                poses['referees'] = [None] * len(detections['referees'])
-        
-        # Segment humans if enabled
-        if self.enable_segmentation and all_humans:
-            segmentations = {'players': [], 'goalkeepers': [], 'referees': []}
+            # Apply padding to boxes (same padding for both pose and segmentation)
+            padded_boxes = self._apply_padding(boxes, frame.shape, self.padding_ratio)
             
-            try:
-                # Apply adaptive padding for segmentation (different from pose)
-                segmentation_base_padding = 30  # Default base padding for segmentation
-                segmentation_padding_ratio = 0.3  # Default padding ratio for segmentation
-                
-                segmentation_padded_boxes = self._apply_adaptive_padding(
-                    np.array(all_humans),
-                    frame.shape,
-                    segmentation_base_padding,
-                    segmentation_padding_ratio
-                )
-                
-                # Run segmentation with adaptively padded boxes
-                seg_results = self.segmentation_detector.segment_boxes(frame, segmentation_padded_boxes)
-                
-                # Organize segmentations by human type
-                player_idx = 0
-                goalkeeper_idx = 0
-                referee_idx = 0
-                
-                for i, (mask, human_type) in enumerate(zip(seg_results, human_indices)):
-                    if human_type == 'player':
-                        segmentations['players'].append(mask)
-                        player_idx += 1
-                    elif human_type == 'goalkeeper':
-                        segmentations['goalkeepers'].append(mask)
-                        goalkeeper_idx += 1
-                    else:  # referee
-                        segmentations['referees'].append(mask)
-                        referee_idx += 1
-                        
-            except Exception as e:
-                print(f"Error during segmentation: {e}")
-                segmentations['players'] = [None] * len(detections['players'])
-                segmentations['goalkeepers'] = [None] * len(detections['goalkeepers'])
-                segmentations['referees'] = [None] * len(detections['referees'])
+            # STEP 3: Run pose estimation if enabled
+            if self.enable_pose:
+                try:
+                    # Detect poses on padded boxes
+                    pose_results = self.pose_detector.detect_poses(frame, padded_boxes)
+                    poses[category] = pose_results
+                except Exception as e:
+                    print(f"Error during pose estimation for {category}: {e}")
+                    poses[category] = [None] * len(boxes)
+            
+            # STEP 4: Run segmentation if enabled
+            if self.enable_segmentation:
+                try:
+                    # Run segmentation on padded boxes
+                    seg_results = self.segmentation_detector.segment_boxes(frame, padded_boxes)
+                    segmentations[category] = seg_results
+                except Exception as e:
+                    print(f"Error during segmentation for {category}: {e}")
+                    segmentations[category] = [None] * len(boxes)
+        
+        # If pose or segmentation is disabled, initialize with None values
+        if not self.enable_pose:
+            poses = None
+        
+        if not self.enable_segmentation:
+            segmentations = None
         
         return detections, poses, segmentations
     

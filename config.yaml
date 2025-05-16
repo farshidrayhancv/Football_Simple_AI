@@ -11,7 +11,7 @@ models:
   player_detection_model_id: "football-players-detection-3zvbc/11"
   field_detection_model_id: "football-field-detection-f07vi/14"
   siglip_model_path: "google/siglip-base-patch16-224"
-  pose_model: "yolov8m-pose.pt" ##TODO: Needs to be trained on Player Pose Dataset See here: https://worldpose.ait.ethz.ch/
+  pose_model: "yolo11m-pose.pt" ##TODO: Needs to be trained on Player Pose Dataset See here: https://worldpose.ait.ethz.ch/
   # SAM model for segmentation (sam2.1_b.pt, sam2.1_l.pt, sam2.1_s.pt)
   sam_model: "sam2.1_l.pt"
 

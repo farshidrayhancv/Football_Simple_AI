@@ -56,7 +56,7 @@ class FootballAI:
         # Use enhanced detector with pose estimation and segmentation
         enable_pose = self.config.get('display', {}).get('show_pose', True)
         enable_segmentation = self.config.get('display', {}).get('show_segmentation', True)
-        pose_model = self.config.get('models', {}).get('pose_model', 'yolov8m-pose.pt')
+        pose_model = self.config.get('models', {}).get('pose_model', 'yolo11m-pose.pt')
         sam_model = self.config.get('models', {}).get('sam_model', 'sam2.1_b.pt')
         segmentation_padding = self.config.get('detection', {}).get('segmentation_padding', 15)
         
@@ -69,7 +69,7 @@ class FootballAI:
             pose_model=pose_model,
             enable_segmentation=enable_segmentation,
             sam_model=sam_model,
-            segmentation_padding=segmentation_padding,
+            padding_ratio=self.config.get('detection', {}).get('padding_ratio', 0.1),  # Default to 10% padding
             device=self.config['performance']['device']
         )
         

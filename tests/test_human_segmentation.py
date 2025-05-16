@@ -114,7 +114,7 @@ def test_human_segmentation(config_path, image_path, save_output=True):
     enhanced_results = []
     
     # Debug visualizations for each human
-    for i, box in enumerate(humans[:min(22, len(humans))]):  # Test 22 players  humans
+    for i, box in enumerate(humans[:min(5, len(humans))]):  # Test 5 players  humans
         print(f"Processing human {i+1}...")
         mask, vis = segmenter.debug_segment_box(image, box)
         enhanced_results.append((mask, vis))
