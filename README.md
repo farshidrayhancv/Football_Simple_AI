@@ -72,17 +72,18 @@ The system generates a professional side-by-side view:
 
 ## 🔄 Computer Vision Pipeline
 
-The Football AI system uses a multi-stage computer vision pipeline to analyze football videos. The diagram below illustrates the complete processing flow from input video to the final visualization with player possession detection.
+The Football AI system employs a sophisticated hierarchical computer vision pipeline to analyze football videos. The diagram below illustrates the complete processing flow from input video to the final visualization with player possession detection.
 
 ```mermaid
 graph TD
     InputFrame["📹 Input Video Frame"]
     ProcessingRes["⚙️ Processing Resolution"]
-    ObjDetection["🔍 Object Detection"]
-    FieldDetection["🏟️ Field Keypoint Detection"]
-    TeamClassifier["👥 Team Classification"]
+    ObjDetection["🔍 Basic Object Detection"]
+    PaddedBoxes["🔲 Adaptive Padded Boxes"]
     PoseEstimation["🤸 Pose Estimation"]
     PlayerSegmentation["🎭 Player Segmentation"]
+    FieldDetection["🏟️ Field Keypoint Detection"]
+    TeamClassifier["👥 Team Classification"]
     Tracking["📊 Object Tracking"]
     PossessionDetection["👐 Player Possession Detection"]
     CoordTransform["📐 Coordinate Transformation"]
@@ -94,10 +95,15 @@ graph TD
     
     InputFrame --> ProcessingRes
     ProcessingRes --> ObjDetection
+    ObjDetection --> PaddedBoxes
+    
+    PaddedBoxes --> PoseEstimation
+    PaddedBoxes --> PlayerSegmentation
+    
     ObjDetection --> |Players, Ball, etc.| TeamClassifier
-    ObjDetection --> |Players, Ball, etc.| PoseEstimation
-    ObjDetection --> |Players, Ball, etc.| PlayerSegmentation
     ObjDetection --> |Players, Ball, etc.| Tracking
+    
+    ProcessingRes --> FieldDetection
     FieldDetection --> |Pitch Keypoints| CoordTransform
     
     TeamClassifier --> FrameAnnotation
@@ -124,9 +130,14 @@ graph TD
     PitchRendering --> FinalOutput
     
     subgraph Enhanced Object Detection
-        ObjDetection
+        PaddedBoxes
         PoseEstimation
         PlayerSegmentation
+    end
+    
+    subgraph Basic Detection
+        ObjDetection
+        FieldDetection
     end
     
     subgraph Real-time Analysis
@@ -149,10 +160,11 @@ graph TD
     classDef visual fill:#fff3e0,stroke:#e65100,stroke-width:2px;
     
     class InputFrame,ProcessingRes input;
-    class ObjDetection,FieldDetection,PoseEstimation,PlayerSegmentation detection;
+    class ObjDetection,FieldDetection detection;
+    class PaddedBoxes,PoseEstimation,PlayerSegmentation detection;
     class Tracking,PossessionDetection,TeamClassifier,CoordTransform,BallTracking analysis;
     class FrameAnnotation,PitchRendering,Statistics,FinalOutput visual;
-```
+  ```
 
 ## ⚠️ Current Limitations
 
