@@ -14,6 +14,8 @@ class FootballAnnotator:
         self.enable_segmentation = config.get('display', {}).get('show_segmentation', True)
         self.enable_possession = config.get('possession_detection', {}).get('enable', True)
         
+        print(f"FootballAnnotator initialized with possession_detection={self.enable_possession}")
+        
         # Team colors for pose visualization
         self.team1_color = self._hex_to_rgb(config['display']['team_colors']['team_1'])
         self.team2_color = self._hex_to_rgb(config['display']['team_colors']['team_2'])
@@ -70,8 +72,10 @@ class FootballAnnotator:
                 print(f"Error annotating poses: {e}")
         
         # Add possession visualization if enabled
-        if possession_result and self.enable_possession:
+        if self.enable_possession and possession_result and possession_result.get('player_id') is not None:
             try:
+                print(f"Highlighting player with possession: ID={possession_result.get('player_id')}, Team={possession_result.get('team_id')}")
+                
                 # Highlight player with possession
                 if self.possession_detector:
                     # Use our instance
@@ -87,6 +91,8 @@ class FootballAnnotator:
                     annotated = temp_detector.highlight_possession(annotated, detections)
             except Exception as e:
                 print(f"Error highlighting possession: {e}")
+                import traceback
+                traceback.print_exc()
         
         return annotated
     

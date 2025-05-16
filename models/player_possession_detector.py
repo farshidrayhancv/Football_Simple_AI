@@ -21,6 +21,8 @@ class PlayerPossessionDetector:
         self.current_team = None  # team_id
         self.closest_candidate = None  # Temporary tracking of closest player
         self.candidate_counter = 0  # Counter to track consecutive frames with same player closest
+        
+        print(f"PlayerPossessionDetector initialized with threshold={proximity_threshold}, frames={possession_frames}")
     
     def update(self, detections, ball_position):
         """Update possession detection based on current detections.
@@ -67,6 +69,7 @@ class PlayerPossessionDetector:
             if self.candidate_counter >= self.possession_frames:
                 self.current_possession = player_id
                 self.current_team = team_id
+                print(f"Player #{player_id} (team {team_id}) now has possession")
         
         return {
             'player_id': self.current_possession,
@@ -80,28 +83,34 @@ class PlayerPossessionDetector:
         
         # Process players, goalkeepers, and referees
         for player_type in ['players', 'goalkeepers', 'referees']:
-            if player_type in detections and len(detections[player_type]) > 0:
-                if not hasattr(detections[player_type], 'get_anchors_coordinates'):
-                    continue
-                    
-                player_positions = detections[player_type].get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+            if player_type not in detections or len(detections[player_type]) == 0:
+                continue
                 
-                if (not hasattr(detections[player_type], 'class_id') or 
-                    not hasattr(detections[player_type], 'tracker_id')):
-                    continue
-                    
-                team_ids = detections[player_type].class_id
-                tracker_ids = detections[player_type].tracker_id
+            if not hasattr(detections[player_type], 'get_anchors_coordinates'):
+                continue
                 
-                if tracker_ids is None:
-                    continue
+            player_positions = detections[player_type].get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+            
+            if (not hasattr(detections[player_type], 'class_id') or 
+                not hasattr(detections[player_type], 'tracker_id')):
+                continue
                 
-                for i, (pos, team_id, tracker_id) in enumerate(zip(player_positions, team_ids, tracker_ids)):
-                    distance = np.linalg.norm(pos - ball_position)
-                    if distance < closest_distance and distance < self.proximity_threshold:
-                        closest_distance = distance
-                        closest_player = (int(team_id), int(tracker_id), distance)
+            team_ids = detections[player_type].class_id
+            tracker_ids = detections[player_type].tracker_id
+            
+            if tracker_ids is None:
+                continue
+            
+            for i, (pos, team_id, tracker_id) in enumerate(zip(player_positions, team_ids, tracker_ids)):
+                distance = np.linalg.norm(pos - ball_position)
+                if distance < closest_distance and distance < self.proximity_threshold:
+                    closest_distance = distance
+                    closest_player = (int(team_id), int(tracker_id), distance)
         
+        if closest_player:
+            team_id, player_id, distance = closest_player
+            print(f"Closest to ball: Player #{player_id} (team {team_id}) at distance {distance:.2f}")
+            
         return closest_player
     
     def highlight_possession(self, frame, detections):
@@ -121,39 +130,50 @@ class PlayerPossessionDetector:
             player_id = self.current_possession
             team_id = self.current_team
             
+            highlighted = False
+            
             # Find this player in the detections
             for player_type in ['players', 'goalkeepers', 'referees']:
-                if player_type in detections and len(detections[player_type]) > 0:
-                    if not hasattr(detections[player_type], 'tracker_id'):
-                        continue
-                        
-                    tracker_ids = detections[player_type].tracker_id
+                if player_type not in detections or len(detections[player_type]) == 0:
+                    continue
                     
-                    if tracker_ids is None:
-                        continue
+                if not hasattr(detections[player_type], 'tracker_id'):
+                    continue
                     
-                    for i, tid in enumerate(tracker_ids):
-                        if int(tid) == player_id:
-                            # Highlight this player
-                            try:
-                                box = detections[player_type].xyxy[i].astype(int)
-                                
-                                # Draw a distinctive highlight
-                                cv2.rectangle(vis_frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 255), 3)
-                                
-                                # Draw a circle above the player
-                                center_x = (box[0] + box[2]) // 2
-                                center_y = box[1] - 30
-                                cv2.circle(vis_frame, (center_x, center_y), 20, (0, 255, 255), -1)
-                                
-                                # Add player ID in the circle
-                                cv2.putText(vis_frame, f"{player_id}", (center_x - 10, center_y + 7),
-                                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-                                
-                                # Draw "POSSESSION" label
-                                cv2.putText(vis_frame, "POSSESSION", (box[0], box[1] - 10),
-                                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                            except Exception as e:
-                                print(f"Error highlighting player: {e}")
+                tracker_ids = detections[player_type].tracker_id
+                
+                if tracker_ids is None:
+                    continue
+                
+                for i, tid in enumerate(tracker_ids):
+                    if int(tid) == player_id:
+                        # Highlight this player
+                        try:
+                            box = detections[player_type].xyxy[i].astype(int)
+                            
+                            # Draw a distinctive highlight - THICKER BORDER
+                            cv2.rectangle(vis_frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 255), 5)
+                            
+                            # Draw a circle above the player
+                            center_x = (box[0] + box[2]) // 2
+                            center_y = box[1] - 30
+                            cv2.circle(vis_frame, (center_x, center_y), 20, (0, 255, 255), -1)
+                            
+                            # Add player ID in the circle
+                            cv2.putText(vis_frame, f"{player_id}", (center_x - 10, center_y + 7),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+                            
+                            # Draw "POSSESSION" label
+                            cv2.putText(vis_frame, "POSSESSION", (box[0], box[1] - 10),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                                       
+                            highlighted = True
+                        except Exception as e:
+                            print(f"Error highlighting player: {e}")
+            
+            if highlighted:
+                print(f"Successfully highlighted player #{player_id} with possession")
+            else:
+                print(f"Could not find player #{player_id} to highlight")
         
         return vis_frame

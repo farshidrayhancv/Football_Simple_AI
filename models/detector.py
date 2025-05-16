@@ -214,7 +214,7 @@ class SegmentationDetector:
             self.model = None
     
     def segment_boxes(self, frame, boxes):
-        """Segment objects within bounding boxes using foreground/background point prompts."""
+        """Segment objects within bounding boxes using improved foreground/background point prompts."""
         if self.model is None or len(boxes) == 0:
             return []
         
@@ -225,36 +225,46 @@ class SegmentationDetector:
             # Create results list
             masks = []
             
-            # Process each box individually with foreground/background prompts
+            # Process each box individually with refined foreground/background prompts
             for box in boxes_list:
                 x1, y1, x2, y2 = map(int, box)
                 
-                # Calculate center point of the box as a foreground point
+                # Box dimensions
+                width = x2 - x1
+                height = y2 - y1
+                
+                # Calculate more reliable foreground points (player's body)
                 center_x = (x1 + x2) // 2
                 center_y = (y1 + y2) // 2
                 
-                # Create combined point list (all points in a single list)
-                all_points = [
-                    # Foreground points (player's body)
-                    [center_x, center_y],          # Center
-                    [center_x, center_y - (y2-y1)//4],  # Upper torso
-                    
-                    # Background points (corners of box)
-                    [x1 + 5, y1 + 5],             # Top-left
-                    [x2 - 5, y1 + 5],             # Top-right
-                    [x1 + 5, y2 - 5],             # Bottom-left
-                    [x2 - 5, y2 - 5]              # Bottom-right
+                # More foreground points on the player's body
+                fg_points = [
+                    [center_x, center_y],                  # Center
+                    [center_x, center_y - height//4],      # Upper torso
+                    [center_x, center_y + height//4]       # Lower torso
                 ]
                 
+                # Background points further away from the box, to ensure they're truly background
+                bg_distance = max(10, min(width, height) // 8)  # Adaptive distance based on box size
+                bg_points = [
+                    [max(0, x1 - bg_distance), max(0, y1 - bg_distance)],       # Top-left
+                    [min(frame.shape[1], x2 + bg_distance), max(0, y1 - bg_distance)],  # Top-right
+                    [max(0, x1 - bg_distance), min(frame.shape[0], y2 + bg_distance)],  # Bottom-left
+                    [min(frame.shape[1], x2 + bg_distance), min(frame.shape[0], y2 + bg_distance)]  # Bottom-right
+                ]
+                
+                # Combine all points
+                all_points = fg_points + bg_points
+                
                 # Create corresponding labels (1=foreground, 0=background)
-                all_labels = [1, 1, 0, 0, 0, 0]  # First 2 are fg, rest are bg
+                all_labels = [1] * len(fg_points) + [0] * len(bg_points)
                 
                 # Run SAM with box and point prompts
                 result = self.model(
                     frame,
                     bboxes=[box],
-                    points=[all_points],  # Single list of points
-                    labels=[all_labels],  # Single list of labels
+                    points=[all_points],
+                    labels=[all_labels],
                     verbose=False,
                     device=self.device
                 )
@@ -262,10 +272,10 @@ class SegmentationDetector:
                 # Extract mask
                 if result and result[0].masks is not None:
                     mask_data = result[0].masks.data.cpu().numpy()
-                    if mask_data.ndim >= 2:
+                    if mask_data.ndim >= 2 and mask_data.shape[0] > 0:
                         masks.append(mask_data[0])  # Take first mask
                     else:
-                        masks.append(mask_data)
+                        masks.append(None)
                 else:
                     masks.append(None)
             
@@ -315,12 +325,12 @@ class SegmentationDetector:
                 device=self.device
             )
             
-            # Extract mask
+            # Extract mask - Fixed index error here
             mask = None
             if result and result[0].masks is not None:
                 mask_data = result[0].masks.data.cpu().numpy()
-                if mask_data.ndim >= 2:
-                    mask = mask_data[1]  # Take first mask
+                if mask_data.ndim >= 2 and mask_data.shape[0] > 0:
+                    mask = mask_data[0]  # Changed from index 1 to index 0
             
             # Visualize result for debugging
             vis_image = image.copy()

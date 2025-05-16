@@ -130,8 +130,12 @@ class FrameProcessor:
         
         # Process possession detection if enabled
         possession_result = None
-        if self.enable_possession and self.possession_detector is not None and ball_position is not None:
-            possession_result = self.possession_detector.update(detections, ball_position)
+        if self.enable_possession and self.possession_detector is not None:
+            if ball_position is not None:
+                possession_result = self.possession_detector.update(detections, ball_position)
+                print(f"Possession detection result: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
+            else:
+                print("No ball position detected for possession tracking")
         
         # Calculate statistics
         pose_stats = None

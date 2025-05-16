@@ -114,7 +114,7 @@ def test_human_segmentation(config_path, image_path, save_output=True):
     enhanced_results = []
     
     # Debug visualizations for each human
-    for i, box in enumerate(humans[:min(3, len(humans))]):  # Test first 3 humans
+    for i, box in enumerate(humans[:min(22, len(humans))]):  # Test 22 players  humans
         print(f"Processing human {i+1}...")
         mask, vis = segmenter.debug_segment_box(image, box)
         enhanced_results.append((mask, vis))
@@ -211,12 +211,12 @@ def test_human_segmentation(config_path, image_path, save_output=True):
                 if pose is not None:
                     result_image = pose_drawer.draw_pose(result_image, pose, (255, 0, 0))
     
-    # Display the result
-    cv2.imshow('Original Image', cv2.resize(image, (800, 600)))
-    cv2.imshow('Human Detection', cv2.resize(vis_image, (800, 600)))
-    cv2.imshow('Final Result', cv2.resize(result_image, (800, 600)))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # # Display the result
+    # cv2.imshow('Original Image', cv2.resize(image, (800, 600)))
+    # cv2.imshow('Human Detection', cv2.resize(vis_image, (800, 600)))
+    # cv2.imshow('Final Result', cv2.resize(result_image, (800, 600)))
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
     
     # Save results
     if save_output:
