@@ -155,6 +155,7 @@ graph TD
     class ObjDetection,FieldDetection,PoseEstimation,PlayerSegmentation detection;
     class Tracking,PossessionDetection,TeamClassifier,CoordTransform,BallTracking analysis;
     class FrameAnnotation,PitchRendering,Statistics,FinalOutput visual;
+```
 
 ## ⚠️ Current Limitations
 
