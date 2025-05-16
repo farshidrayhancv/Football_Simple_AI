@@ -73,6 +73,89 @@ The system generates a professional side-by-side view:
 - 🎮 CUDA-capable GPU (optional but recommended)
 - 🐳 Docker and Docker Compose (for containerised deployment)
 
+## 🔄 Computer Vision Pipeline
+
+The Football AI system uses a multi-stage computer vision pipeline to analyze football videos. The diagram below illustrates the complete processing flow from input video to the final visualization with player possession detection.
+
+```mermaid
+graph TD
+    InputFrame["📹 Input Video Frame"]
+    ProcessingRes["⚙️ Processing Resolution"]
+    ObjDetection["🔍 Object Detection"]
+    FieldDetection["🏟️ Field Keypoint Detection"]
+    TeamClassifier["👥 Team Classification"]
+    PoseEstimation["🤸 Pose Estimation"]
+    PlayerSegmentation["🎭 Player Segmentation"]
+    Tracking["📊 Object Tracking"]
+    PossessionDetection["👐 Player Possession Detection"]
+    CoordTransform["📐 Coordinate Transformation"]
+    BallTracking["⚽ Ball Tracking & Trail"]
+    Statistics["📈 Performance Statistics"]
+    FrameAnnotation["🎨 Frame Annotation"]
+    PitchRendering["🏆 Tactical View Rendering"]
+    FinalOutput["🖥️ Combined Visualization"]
+    
+    InputFrame --> ProcessingRes
+    ProcessingRes --> ObjDetection
+    ObjDetection --> |Players, Ball, etc.| TeamClassifier
+    ObjDetection --> |Players, Ball, etc.| PoseEstimation
+    ObjDetection --> |Players, Ball, etc.| PlayerSegmentation
+    ObjDetection --> |Players, Ball, etc.| Tracking
+    FieldDetection --> |Pitch Keypoints| CoordTransform
+    
+    TeamClassifier --> FrameAnnotation
+    PoseEstimation --> FrameAnnotation
+    PlayerSegmentation --> FrameAnnotation
+    Tracking --> |Tracked Objects| PossessionDetection
+    Tracking --> |Tracked Objects| BallTracking
+    
+    ObjDetection --> |Ball Position| PossessionDetection
+    CoordTransform --> |Homography Matrix| PitchRendering
+    
+    PossessionDetection --> |Possession Info| FrameAnnotation
+    BallTracking --> |Ball Trail| PitchRendering
+    Tracking --> |Player Positions| PitchRendering
+    CoordTransform --> |Player Positions| PitchRendering
+    
+    ObjDetection --> |Detection Results| Statistics
+    PoseEstimation --> |Pose Results| Statistics
+    PlayerSegmentation --> |Segmentation Results| Statistics
+    PossessionDetection --> |Possession Stats| Statistics
+    
+    Statistics --> FrameAnnotation
+    FrameAnnotation --> FinalOutput
+    PitchRendering --> FinalOutput
+    
+    subgraph Enhanced Object Detection
+        ObjDetection
+        PoseEstimation
+        PlayerSegmentation
+    end
+    
+    subgraph Real-time Analysis
+        Tracking
+        PossessionDetection
+        BallTracking
+    end
+    
+    subgraph Visualization Engine
+        FrameAnnotation
+        PitchRendering
+        Statistics
+        FinalOutput
+    end
+    
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:2px;
+    classDef input fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
+    classDef detection fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px;
+    classDef analysis fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef visual fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    
+    class InputFrame,ProcessingRes input;
+    class ObjDetection,FieldDetection,PoseEstimation,PlayerSegmentation detection;
+    class Tracking,PossessionDetection,TeamClassifier,CoordTransform,BallTracking analysis;
+    class FrameAnnotation,PitchRendering,Statistics,FinalOutput visual;
+
 ## ⚠️ Current Limitations
 
 - ⏱️ Processing speed: 1 frame per 1.7 seconds

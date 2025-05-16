@@ -6,23 +6,32 @@ import supervision as sv
 
 
 class PlayerPossessionDetector:
-    def __init__(self, proximity_threshold=50, possession_frames=3):
+    def __init__(self, proximity_threshold=50, possession_frames=3, possession_duration=10):
         """Initialize player possession detector.
         
         Args:
-            proximity_threshold: Distance in pixels for a player to be considered in possession
-            possession_frames: Number of frames a player needs to be closest to be in possession
+            proximity_threshold: Distance in pixels for a player to be considered in proximity
+            possession_frames: Number of frames a player needs to be closest to be considered for possession
+            possession_duration: Minimum duration (in frames) a player must maintain possession
+                                 to filter out false positives during passes
         """
         self.proximity_threshold = proximity_threshold
         self.possession_frames = possession_frames
+        self.possession_duration = possession_duration
         
         # Possession tracking
         self.current_possession = None  # player_id
         self.current_team = None  # team_id
         self.closest_candidate = None  # Temporary tracking of closest player
         self.candidate_counter = 0  # Counter to track consecutive frames with same player closest
+        self.possession_timer = 0  # Duration counter for confirmed possession
         
-        print(f"PlayerPossessionDetector initialized with threshold={proximity_threshold}, frames={possession_frames}")
+        # Keep track of recent proximity changes
+        self.previous_closest_players = []  # List of recently close players
+        self.player_proximity_durations = {}  # Track how long each player has been close to ball
+        
+        print(f"PlayerPossessionDetector initialized with threshold={proximity_threshold}, "
+              f"frames={possession_frames}, duration={possession_duration}")
     
     def update(self, detections, ball_position):
         """Update possession detection based on current detections.
@@ -38,42 +47,93 @@ class PlayerPossessionDetector:
         if ball_position is None or len(ball_position) == 0:
             return {
                 'player_id': self.current_possession,
-                'team_id': self.current_team
+                'team_id': self.current_team,
+                'status': 'no_ball_detected'
             }
         
         # Find the closest player to the ball
         closest_player = self._find_closest_player(detections, ball_position)
         
-        # If no player is close enough, no one has possession
+        # If no player is close enough, no one has proximity
         if closest_player is None:
             self.candidate_counter = 0
             self.closest_candidate = None
+            
+            # Decrement possession timer when ball is far from all players
+            if self.possession_timer > 0:
+                self.possession_timer -= 1
+                
+                # Clear possession if timer expires
+                if self.possession_timer == 0:
+                    self.current_possession = None
+                    self.current_team = None
+                    print("Possession cleared: no player close to ball")
+            
+            # Clear all player proximity durations
+            self.player_proximity_durations = {}
+                
             return {
                 'player_id': self.current_possession,
-                'team_id': self.current_team
+                'team_id': self.current_team,
+                'status': 'no_player_close'
             }
         
         # Get player details
         team_id, player_id, distance = closest_player
+        
+        # Track this player's proximity duration
+        if player_id not in self.player_proximity_durations:
+            self.player_proximity_durations[player_id] = 0
+        self.player_proximity_durations[player_id] += 1
+        
+        # Decay proximity duration for other players
+        for pid in list(self.player_proximity_durations.keys()):
+            if pid != player_id:
+                self.player_proximity_durations[pid] = max(0, self.player_proximity_durations[pid] - 1)
+                if self.player_proximity_durations[pid] == 0:
+                    self.player_proximity_durations.pop(pid)
         
         # Check if we have a new closest player
         if self.closest_candidate is None or self.closest_candidate != player_id:
             # Reset counter for new player
             self.closest_candidate = player_id
             self.candidate_counter = 1
+            
+            # Keep previous possession until new possession is confirmed
+            status = 'new_closest_player'
         else:
             # Same player is still closest, increment counter
             self.candidate_counter += 1
+            status = 'proximity_building'
             
-            # If player has been closest for enough frames, they have possession
+            # If player has been closest for enough frames, they are a possession candidate
             if self.candidate_counter >= self.possession_frames:
-                self.current_possession = player_id
-                self.current_team = team_id
-                print(f"Player #{player_id} (team {team_id}) now has possession")
+                # Check if this is a new player or the same as current possession
+                if self.current_possession != player_id:
+                    # Only assign new possession if player has been in proximity for long enough
+                    if self.player_proximity_durations[player_id] >= self.possession_duration:
+                        self.current_possession = player_id
+                        self.current_team = team_id
+                        self.possession_timer = self.possession_duration  # Reset possession timer
+                        status = 'possession_changed'
+                        print(f"Player #{player_id} (team {team_id}) now has possession "
+                              f"after {self.player_proximity_durations[player_id]} frames of proximity")
+                    else:
+                        status = 'potential_possession'
+                else:
+                    # Same player maintains possession, refresh timer
+                    self.possession_timer = self.possession_duration
+                    status = 'possession_maintained'
         
+        # Add status info to return value for logging
         return {
             'player_id': self.current_possession,
-            'team_id': self.current_team
+            'team_id': self.current_team,
+            'status': status,
+            'proximity_player': player_id,
+            'proximity_duration': self.player_proximity_durations.get(player_id, 0),
+            'candidate_counter': self.candidate_counter,
+            'possession_timer': self.possession_timer
         }
     
     def _find_closest_player(self, detections, ball_position):
@@ -175,5 +235,77 @@ class PlayerPossessionDetector:
                 print(f"Successfully highlighted player #{player_id} with possession")
             else:
                 print(f"Could not find player #{player_id} to highlight")
+        
+        return vis_frame
+    
+    def draw_debug_info(self, frame, detections):
+        """Draw debug information about possession status.
+        
+        Args:
+            frame: Frame to draw on
+            detections: Current detections
+            
+        Returns:
+            Frame with debug information
+        """
+        vis_frame = frame.copy()
+        
+        # Create semi-transparent overlay for stats panel
+        height, width = vis_frame.shape[:2]
+        panel_height = 200
+        panel_width = 300
+        panel_x = width - panel_width - 10
+        panel_y = 10
+        
+        overlay = vis_frame.copy()
+        cv2.rectangle(overlay, (panel_x, panel_y), 
+                     (panel_x + panel_width, panel_y + panel_height), 
+                     (0, 0, 0), -1)
+        vis_frame = cv2.addWeighted(overlay, 0.7, vis_frame, 0.3, 0)
+        
+        # Draw title
+        cv2.putText(vis_frame, "POSSESSION DEBUG", (panel_x + 10, panel_y + 25),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        # Draw possession information
+        y_offset = panel_y + 50
+        
+        if self.current_possession is not None:
+            cv2.putText(vis_frame, f"Current: Player #{self.current_possession}", 
+                       (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        else:
+            cv2.putText(vis_frame, "Current: None", 
+                       (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
+        
+        cv2.putText(vis_frame, f"Candidate: {self.closest_candidate}", 
+                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
+        
+        cv2.putText(vis_frame, f"Counter: {self.candidate_counter}/{self.possession_frames}", 
+                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
+        
+        cv2.putText(vis_frame, f"Pos timer: {self.possession_timer}/{self.possession_duration}", 
+                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
+        
+        # Show proximity durations for players
+        if self.player_proximity_durations:
+            cv2.putText(vis_frame, "Proximity durations:", 
+                       (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            y_offset += 25
+            
+            # Sort by duration
+            sorted_durations = sorted(
+                self.player_proximity_durations.items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            )
+            
+            for player_id, duration in sorted_durations[:3]:  # Show top 3
+                cv2.putText(vis_frame, f"  #{player_id}: {duration} frames", 
+                           (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                y_offset += 20
         
         return vis_frame
