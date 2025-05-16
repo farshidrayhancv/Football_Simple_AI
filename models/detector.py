@@ -214,7 +214,7 @@ class SegmentationDetector:
             self.model = None
     
     def segment_boxes(self, frame, boxes):
-        """Segment objects within bounding boxes."""
+        """Segment objects within bounding boxes using foreground/background point prompts."""
         if self.model is None or len(boxes) == 0:
             return []
         
@@ -222,36 +222,137 @@ class SegmentationDetector:
             # Convert boxes to list format for SAM
             boxes_list = boxes.tolist() if isinstance(boxes, np.ndarray) else boxes
             
-            # Run SAM with bounding box prompts
-            results = self.model(frame, bboxes=boxes_list, verbose=False, device=self.device)
-            
-            # Extract masks
+            # Create results list
             masks = []
-            if results and len(results) > 0:
-                for result in results:
-                    if hasattr(result, 'masks') and result.masks is not None:
-                        # Get the mask data
-                        mask_data = result.masks.data.cpu().numpy()
-                        if mask_data.ndim >= 2:
-                            masks.append(mask_data[0])  # Take first mask
-                        else:
-                            masks.append(mask_data)
+            
+            # Process each box individually with foreground/background prompts
+            for box in boxes_list:
+                x1, y1, x2, y2 = map(int, box)
+                
+                # Calculate center point of the box as a foreground point
+                center_x = (x1 + x2) // 2
+                center_y = (y1 + y2) // 2
+                
+                # Create combined point list (all points in a single list)
+                all_points = [
+                    # Foreground points (player's body)
+                    [center_x, center_y],          # Center
+                    [center_x, center_y - (y2-y1)//4],  # Upper torso
+                    
+                    # Background points (corners of box)
+                    [x1 + 5, y1 + 5],             # Top-left
+                    [x2 - 5, y1 + 5],             # Top-right
+                    [x1 + 5, y2 - 5],             # Bottom-left
+                    [x2 - 5, y2 - 5]              # Bottom-right
+                ]
+                
+                # Create corresponding labels (1=foreground, 0=background)
+                all_labels = [1, 1, 0, 0, 0, 0]  # First 2 are fg, rest are bg
+                
+                # Run SAM with box and point prompts
+                result = self.model(
+                    frame,
+                    bboxes=[box],
+                    points=[all_points],  # Single list of points
+                    labels=[all_labels],  # Single list of labels
+                    verbose=False,
+                    device=self.device
+                )
+                
+                # Extract mask
+                if result and result[0].masks is not None:
+                    mask_data = result[0].masks.data.cpu().numpy()
+                    if mask_data.ndim >= 2:
+                        masks.append(mask_data[0])  # Take first mask
                     else:
-                        masks.append(None)
+                        masks.append(mask_data)
+                else:
+                    masks.append(None)
             
             return masks
             
         except Exception as e:
             print(f"Segmentation error: {e}")
             return [None] * len(boxes)
+            
+    def debug_segment_box(self, image, box):
+        """Debug version with point prompts for better player segmentation."""
+        if self.model is None:
+            return None, image
+        
+        try:
+            # Convert box to list
+            box_list = box.tolist() if isinstance(box, np.ndarray) else box
+            x1, y1, x2, y2 = map(int, box_list)
+            
+            # Calculate center point of the box as a foreground point
+            center_x = (x1 + x2) // 2
+            center_y = (y1 + y2) // 2
+            
+            # Create combined point list (all points in a single list)
+            all_points = [
+                # Foreground points (player's body)
+                [center_x, center_y],          # Center
+                [center_x, center_y - (y2-y1)//4],  # Upper torso
+                
+                # Background points (corners of box)
+                [x1 + 5, y1 + 5],             # Top-left
+                [x2 - 5, y1 + 5],             # Top-right
+                [x1 + 5, y2 - 5],             # Bottom-left
+                [x2 - 5, y2 - 5]              # Bottom-right
+            ]
+            
+            # Create corresponding labels (1=foreground, 0=background)
+            all_labels = [1, 1, 0, 0, 0, 0]  # First 2 are fg, rest are bg
+            
+            # Run SAM with box and point prompts
+            result = self.model(
+                image,
+                bboxes=[box_list],
+                points=[all_points],  # Single list of points
+                labels=[all_labels],  # Single list of labels
+                verbose=False,
+                device=self.device
+            )
+            
+            # Extract mask
+            mask = None
+            if result and result[0].masks is not None:
+                mask_data = result[0].masks.data.cpu().numpy()
+                if mask_data.ndim >= 2:
+                    mask = mask_data[1]  # Take first mask
+            
+            # Visualize result for debugging
+            vis_image = image.copy()
+            if mask is not None:
+                vis_image[mask > 0.5] = vis_image[mask > 0.5] * 0.7 + np.array([0, 0, 255]) * 0.3
+                
+            # Draw box and points
+            cv2.rectangle(vis_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Draw foreground points
+            for i in range(2):  # First 2 points are foreground
+                px, py = all_points[i]
+                cv2.circle(vis_image, (px, py), 5, (0, 255, 0), -1)  # Green
+                
+            # Draw background points
+            for i in range(2, 6):  # Last 4 points are background
+                px, py = all_points[i]
+                cv2.circle(vis_image, (px, py), 5, (0, 0, 255), -1)  # Red
+                
+            return mask, vis_image
+                
+        except Exception as e:
+            print(f"Debug segmentation error: {e}")
+            return None, image
 
 
 class EnhancedObjectDetector(ObjectDetector):
     """Object detector with integrated pose estimation and segmentation."""
     
     def __init__(self, model_id, api_key, confidence_threshold=0.5, 
-                 enable_pose=True, pose_model='yolov8m-pose.pt',
-                 enable_segmentation=True, sam_model='sam2.1_b.pt', 
+                 enable_pose=True, pose_model='yolo11n-pose.pt',
+                 enable_segmentation=True, sam_model='sam2.1_s.pt', 
                  segmentation_padding=15, device='cpu'):
         super().__init__(model_id, api_key, confidence_threshold)
         

@@ -1,4 +1,4 @@
-"""Visualization annotators module with pose and segmentation support."""
+"""Visualization annotators module with player possession highlighting."""
 
 import cv2
 import numpy as np
@@ -6,11 +6,13 @@ import supervision as sv
 
 
 class FootballAnnotator:
-    def __init__(self, config):
+    def __init__(self, config, possession_detector=None):
         self.config = config
+        self.possession_detector = possession_detector
         self._init_annotators()
         self.enable_pose = config.get('display', {}).get('show_pose', True)
         self.enable_segmentation = config.get('display', {}).get('show_segmentation', True)
+        self.enable_possession = config.get('possession_detection', {}).get('enable', True)
         
         # Team colors for pose visualization
         self.team1_color = self._hex_to_rgb(config['display']['team_colors']['team_1'])
@@ -51,8 +53,8 @@ class FootballAnnotator:
             outline_thickness=1
         )
     
-    def annotate_frame_with_pose_and_segmentation(self, frame, detections, poses=None, segmentations=None):
-        """Annotate frame with detections, pose estimations, and segmentations."""
+    def annotate_frame_with_all_features(self, frame, detections, poses=None, segmentations=None, possession_result=None):
+        """Annotate frame with all available features."""
         # First apply segmentations if available
         if segmentations and self.enable_segmentation:
             frame = self._annotate_segmentations(frame, detections, segmentations)
@@ -60,18 +62,42 @@ class FootballAnnotator:
         # Then apply standard annotations
         annotated = self.annotate_frame(frame, detections)
         
-        # Finally add pose annotations if available
+        # Add pose annotations if available
         if poses and self.enable_pose:
             try:
                 annotated = self._annotate_poses(annotated, detections, poses)
             except Exception as e:
                 print(f"Error annotating poses: {e}")
         
+        # Add possession visualization if enabled
+        if possession_result and self.enable_possession:
+            try:
+                # Highlight player with possession
+                if self.possession_detector:
+                    # Use our instance
+                    self.possession_detector.current_possession = possession_result.get('player_id')
+                    self.possession_detector.current_team = possession_result.get('team_id')
+                    annotated = self.possession_detector.highlight_possession(annotated, detections)
+                else:
+                    # Import and create one if we don't have it
+                    from models.player_possession_detector import PlayerPossessionDetector
+                    temp_detector = PlayerPossessionDetector()
+                    temp_detector.current_possession = possession_result.get('player_id')
+                    temp_detector.current_team = possession_result.get('team_id')
+                    annotated = temp_detector.highlight_possession(annotated, detections)
+            except Exception as e:
+                print(f"Error highlighting possession: {e}")
+        
         return annotated
+    
+    # Backward compatibility methods
+    def annotate_frame_with_pose_and_segmentation(self, frame, detections, poses=None, segmentations=None):
+        """Backward compatible method for pose and segmentation annotation."""
+        return self.annotate_frame_with_all_features(frame, detections, poses, segmentations, None)
     
     def annotate_frame_with_pose(self, frame, detections, poses=None):
         """Backward compatible method for pose-only annotation."""
-        return self.annotate_frame_with_pose_and_segmentation(frame, detections, poses, None)
+        return self.annotate_frame_with_all_features(frame, detections, poses, None, None)
     
     def _annotate_segmentations(self, frame, detections, segmentations):
         """Add segmentation masks to frame."""
@@ -200,8 +226,8 @@ class FootballAnnotator:
         
         return frame
     
-    def draw_stats_with_pose_and_segmentation(self, frame, stats, pose_stats=None, seg_stats=None):
-        """Draw statistics including pose and segmentation information."""
+    def draw_stats_with_all_features(self, frame, stats, pose_stats=None, seg_stats=None, possession_result=None):
+        """Draw statistics including pose, segmentation, and possession information."""
         annotated = frame.copy()
         
         y_offset = 30
@@ -237,8 +263,27 @@ class FootballAnnotator:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 255), 2)
                 y_offset += 25
         
+        # Add possession information if available
+        if possession_result and possession_result.get('player_id') is not None:
+            y_offset += 10
+            cv2.putText(annotated, "Possession:", (10, y_offset),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            y_offset += 25
+            
+            player_id = possession_result.get('player_id')
+            team_id = possession_result.get('team_id')
+            
+            team_text = f"Team {team_id + 1}" if team_id in [0, 1] else "Referee/Other"
+            text = f"  Player #{player_id} ({team_text})"
+            cv2.putText(annotated, text, (10, y_offset),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            y_offset += 25
+        
         return annotated
     
+    # Backward compatibility methods
+    def draw_stats_with_pose_and_segmentation(self, frame, stats, pose_stats=None, seg_stats=None):
+        return self.draw_stats_with_all_features(frame, stats, pose_stats, seg_stats, None)
+    
     def draw_stats_with_pose(self, frame, stats, pose_stats=None):
-        """Backward compatible method."""
-        return self.draw_stats_with_pose_and_segmentation(frame, stats, pose_stats, None)
+        return self.draw_stats_with_all_features(frame, stats, pose_stats, None, None)

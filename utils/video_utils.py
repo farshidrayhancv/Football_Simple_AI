@@ -1,4 +1,4 @@
-"""Video processing utilities with standardized resolution support."""
+"""Video processing utilities with player possession detection support."""
 
 import cv2
 import numpy as np
@@ -11,6 +11,7 @@ class VideoProcessor:
     def __init__(self, config):
         self.config = config
         self.processing_resolution = config.get('processing', {}).get('resolution', None)
+        self.enable_possession = config.get('possession_detection', {}).get('enable', True)
     
     def collect_player_crops(self, video_path, detector, stride):
         """Collect player crops from video for training."""
@@ -59,9 +60,9 @@ class VideoProcessor:
         print(f"Collected {len(crops)} player crops")
         return crops
     
-    def process_video_with_pose_and_segmentation(self, video_path, output_path, frame_processor, 
-                                                annotator, pitch_renderer, tracker):
-        """Process video with pose estimation, segmentation, and SAHI support."""
+    def process_video_with_possession(self, video_path, output_path, frame_processor, 
+                                     annotator, pitch_renderer, tracker):
+        """Process video with pose estimation, segmentation, and player possession detection."""
         # Open video
         cap = cv2.VideoCapture(video_path)
         
@@ -86,6 +87,8 @@ class VideoProcessor:
                 output_suffix += "_pose"
             if self.config.get('display', {}).get('show_segmentation', False):
                 output_suffix += "_seg"
+            if self.enable_possession:
+                output_suffix += "_possession"
             output_path = f"{base_name}{output_suffix}.mp4"
         
         # Create video writer
@@ -104,6 +107,8 @@ class VideoProcessor:
             features.append("pose")
         if self.config.get('display', {}).get('show_segmentation', False):
             features.append("segmentation")
+        if self.enable_possession:
+            features.append("player possession")
         
         features_str = " with " + ", ".join(features) if features else ""
         print(f"Processing {total_frames} frames{features_str}...")
@@ -124,22 +129,18 @@ class VideoProcessor:
                 results = frame_processor.process_frame(frame)
                 
                 # Unpack results
-                if len(results) == 7:
-                    detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats = results
+                if len(results) >= 8:
+                    detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats, possession_result = results
                 else:
                     # Fallback for older versions
                     detections, transformer, poses, pose_stats, segmentations, seg_stats = results[:6]
-                    sahi_stats = None
+                    sahi_stats = None if len(results) < 7 else results[6]
+                    possession_result = None
                 
-                # Create visualizations
-                if segmentations:
-                    annotated_frame = annotator.annotate_frame_with_pose_and_segmentation(
-                        frame, detections, poses, segmentations
-                    )
-                elif poses:
-                    annotated_frame = annotator.annotate_frame_with_pose(frame, detections, poses)
-                else:
-                    annotated_frame = annotator.annotate_frame(frame, detections)
+                # Create visualizations with all features
+                annotated_frame = annotator.annotate_frame_with_all_features(
+                    frame, detections, poses, segmentations, possession_result
+                )
                 
                 # Add resolution info
                 annotated_frame = self._draw_resolution_info(annotated_frame, frame)
@@ -156,8 +157,8 @@ class VideoProcessor:
                     annotated_frame = self._draw_sahi_info(annotated_frame, sahi_stats)
                 
                 # Draw all statistics
-                annotated_frame = annotator.draw_stats_with_pose_and_segmentation(
-                    annotated_frame, stats, pose_stats, seg_stats
+                annotated_frame = annotator.draw_stats_with_all_features(
+                    annotated_frame, stats, pose_stats, seg_stats, possession_result
                 )
                 
                 # Render pitch view
@@ -224,10 +225,19 @@ class VideoProcessor:
         
         return frame
     
+    # Backward compatible methods
+    def process_video_with_pose_and_segmentation(self, video_path, output_path, frame_processor, 
+                                               annotator, pitch_renderer, tracker):
+        """Backward compatible method."""
+        return self.process_video_with_possession(
+            video_path, output_path, frame_processor, 
+            annotator, pitch_renderer, tracker
+        )
+    
     def process_video_with_pose(self, video_path, output_path, frame_processor, 
                                annotator, pitch_renderer, tracker):
         """Backward compatible method."""
-        return self.process_video_with_pose_and_segmentation(
+        return self.process_video_with_possession(
             video_path, output_path, frame_processor, 
             annotator, pitch_renderer, tracker
         )
@@ -235,7 +245,7 @@ class VideoProcessor:
     def process_video(self, video_path, output_path, frame_processor, 
                      annotator, pitch_renderer, tracker):
         """Backward compatible method."""
-        return self.process_video_with_pose_and_segmentation(
+        return self.process_video_with_possession(
             video_path, output_path, frame_processor, 
             annotator, pitch_renderer, tracker
         )
@@ -265,6 +275,8 @@ class VideoProcessor:
             label += " + Pose"
         if self.config.get('display', {}).get('show_segmentation', False):
             label += " + Seg"
+        if self.enable_possession:
+            label += " + Player Possession"
         
         cv2.putText(combined, label, (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main Football AI Application with Processing Resolution Support
+Main Football AI Application with Player Possession Detection
 """
 
 import argparse
@@ -11,6 +11,7 @@ from config.config_loader import ConfigLoader
 from models.detector import EnhancedObjectDetector, FieldDetector
 from models.classifier import TeamClassifierModule
 from models.tracker import ObjectTracker
+from models.player_possession_detector import PlayerPossessionDetector
 from processing.frame_processor import FrameProcessor
 from visualization.annotators import FootballAnnotator
 from visualization.pitch_renderer import PitchRenderer
@@ -86,6 +87,15 @@ class FootballAI:
         )
         
         self.tracker = ObjectTracker()
+        
+        # Initialize player possession detector
+        if self.config.get('possession_detection', {}).get('enable', True):
+            self.possession_detector = PlayerPossessionDetector(
+                proximity_threshold=self.config.get('possession_detection', {}).get('proximity_threshold', 50),
+                possession_frames=self.config.get('possession_detection', {}).get('possession_frames', 3)
+            )
+        else:
+            self.possession_detector = None
     
     def _init_processors(self):
         """Initialize processors."""
@@ -94,12 +104,16 @@ class FootballAI:
             field_detector=self.field_detector,
             team_classifier=self.team_classifier,
             tracker=self.tracker,
-            config=self.config
+            config=self.config,
+            possession_detector=self.possession_detector
         )
     
     def _init_visualization(self):
         """Initialize visualization components."""
-        self.annotator = FootballAnnotator(self.config)
+        self.annotator = FootballAnnotator(
+            config=self.config,
+            possession_detector=self.possession_detector
+        )
         self.pitch_renderer = PitchRenderer(self.config)
     
     def train_team_classifier(self, video_path):
@@ -139,6 +153,7 @@ class FootballAI:
         print(f"  SAHI: {'Enabled' if self.config.get('sahi', {}).get('enable', False) else 'Disabled'}")
         print(f"  Pose Estimation: {'Enabled' if self.config.get('display', {}).get('show_pose', False) else 'Disabled'}")
         print(f"  Segmentation: {'Enabled' if self.config.get('display', {}).get('show_segmentation', False) else 'Disabled'}")
+        print(f"  Possession Detection: {'Enabled' if self.config.get('possession_detection', {}).get('enable', True) else 'Disabled'}")
         
         processing_res = self.config.get('processing', {}).get('resolution', None)
         if processing_res:
@@ -151,8 +166,8 @@ class FootballAI:
         # Train team classifier
         self.train_team_classifier(video_path)
         
-        # Process video with pose estimation and segmentation
-        self.video_processor.process_video_with_pose_and_segmentation(
+        # Process video with possession detection
+        self.video_processor.process_video_with_possession(
             video_path=video_path,
             output_path=output_path,
             frame_processor=self.frame_processor,

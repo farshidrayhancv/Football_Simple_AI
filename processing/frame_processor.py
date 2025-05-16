@@ -1,4 +1,4 @@
-"""Frame processing module with standardized resolution and adaptive padding support."""
+"""Frame processing module with player possession detection."""
 
 import cv2
 import numpy as np
@@ -9,12 +9,13 @@ from .sahi_processor import SAHIProcessor
 
 
 class FrameProcessor:
-    def __init__(self, player_detector, field_detector, team_classifier, tracker, config):
+    def __init__(self, player_detector, field_detector, team_classifier, tracker, config, possession_detector=None):
         self.player_detector = player_detector
         self.field_detector = field_detector
         self.team_classifier = team_classifier
         self.tracker = tracker
         self.config = config
+        self.possession_detector = possession_detector
         
         self.team_resolver = TeamResolver()
         self.coordinate_transformer = CoordinateTransformer(config)
@@ -24,6 +25,7 @@ class FrameProcessor:
         self.enable_pose = config.get('display', {}).get('show_pose', True)
         self.enable_segmentation = config.get('display', {}).get('show_segmentation', True)
         self.enable_sahi = config.get('sahi', {}).get('enable', False)
+        self.enable_possession = config.get('possession_detection', {}).get('enable', True)
         
         # Processing resolution
         self.processing_resolution = config.get('processing', {}).get('resolution', None)
@@ -112,12 +114,24 @@ class FrameProcessor:
         # Field detection and transformation (use original frame)
         transformer = self._update_field_transformation(frame)
         
-        # Update ball trail
-        if len(ball_detections) > 0 and transformer is not None:
+        # Update ball trail and get ball position
+        ball_position = None
+        if len(ball_detections) > 0:
             ball_xy = ball_detections.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
-            pitch_ball_xy = transformer.transform_points(points=ball_xy)
-            if len(pitch_ball_xy) > 0:
-                self.tracker.update_ball_trail(pitch_ball_xy[0])
+            if transformer is not None:
+                pitch_ball_xy = transformer.transform_points(points=ball_xy)
+                if len(pitch_ball_xy) > 0:
+                    ball_position = pitch_ball_xy[0]
+                    self.tracker.update_ball_trail(ball_position)
+            else:
+                # Use frame coordinates if no transformer
+                if len(ball_xy) > 0:
+                    ball_position = ball_xy[0]
+        
+        # Process possession detection if enabled
+        possession_result = None
+        if self.enable_possession and self.possession_detector is not None and ball_position is not None:
+            possession_result = self.possession_detector.update(detections, ball_position)
         
         # Calculate statistics
         pose_stats = None
@@ -133,8 +147,9 @@ class FrameProcessor:
         if self.enable_sahi:
             sahi_stats = self._calculate_sahi_stats(detections)
         
-        return detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats
+        return detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats, possession_result
     
+    # Rest of your existing methods remain unchanged
     def _scale_detections_dict(self, detections_dict, scale_factor):
         """Scale all detections back to original resolution."""
         scale_x, scale_y = scale_factor
@@ -303,7 +318,6 @@ class FrameProcessor:
         
         return stats
     
-
     def _calculate_sahi_stats(self, detections):
         """Calculate SAHI statistics."""
         stats = {}
