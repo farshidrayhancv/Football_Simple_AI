@@ -34,9 +34,6 @@ A powerful computer vision system that analyses football match videos to detect 
 ### 🔍 (Object Detection + Tracking) + Player Pose Estimation + Segmentation
 ![Football AI Preview](preview.jpg)
 
-### 🏃 (Object Detection + Tracking) + Pose Estimation
-![Football AI Preview](preview_pose.jpg)
-
 ### 🏆 Player Possession Detection
 ![Football AI Preview](preview_player_possession.jpg)
 
