@@ -41,7 +41,7 @@ A powerful computer vision system that analyses football match videos to detect 
 ![Football AI Preview](Preview_seg.png)
 
 ### 🏆 Player Possession Detection
-![Football AI Preview](preview_possession.jpg)
+![Football AI Preview](preview_player_possession.jpg)
 
 </div>
 
