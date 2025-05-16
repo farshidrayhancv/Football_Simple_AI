@@ -75,7 +75,7 @@ The system generates a professional side-by-side view:
 
 ## ⚠️ Current Limitations
 
-- ⏱️ Processing speed: 1 frame per 3-4 seconds
+- ⏱️ Processing speed: 1 frame per 1.7 seconds
 - 🎯 Only object detection models are purpose-trained
 - 🤸 Pose detection challenges with occlusion
 - 👥 Some player poses may not be detected accurately
