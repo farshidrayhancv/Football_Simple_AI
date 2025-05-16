@@ -4,7 +4,12 @@ import torch
 import numpy as np
 from transformers import AutoProcessor, SiglipVisionModel
 from sports.common.team import TeamClassifier
+import warnings
 
+# Filter out specific scikit-learn warnings
+# The issue is that the TeamClassifier class from the sports.common.team module
+# is using the deprecated parameter force_all_finite in its KMeans clustering implementation.
+warnings.filterwarnings("ignore", message=".*force_all_finite.*")
 
 class TeamClassifierModule:
     def __init__(self, device='cpu', hf_token=None, model_path=None):
@@ -21,8 +26,8 @@ class TeamClassifierModule:
         self.siglip_model = SiglipVisionModel.from_pretrained(
             self.model_path,
             token=self.hf_token,  # Changed from use_auth_token
-            torch_dtype=torch.float16,  # Use float16 for efficiency
-            device_map="auto"  # Let transformers handle device placement
+            # torch_dtype=torch.float16,  # Use float16 for efficiency
+            # device_map="auto"  # Let transformers handle device placement
         ).to(self.device)
         
         self.siglip_processor = AutoProcessor.from_pretrained(

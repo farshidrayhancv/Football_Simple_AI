@@ -59,6 +59,7 @@ class FootballAI:
         sam_model = self.config.get('models', {}).get('sam_model', 'sam2.1_b.pt')
         segmentation_padding = self.config.get('detection', {}).get('segmentation_padding', 15)
         
+        print("Loading player detection model...")
         self.player_detector = EnhancedObjectDetector(
             model_id=self.config['models']['player_detection_model_id'],
             api_key=self.config['api_keys']['roboflow_api_key'],
@@ -71,6 +72,7 @@ class FootballAI:
             device=self.config['performance']['device']
         )
         
+        print("Loading field detection model...")
         self.field_detector = FieldDetector(
             model_id=self.config['models']['field_detection_model_id'],
             api_key=self.config['api_keys']['roboflow_api_key']
