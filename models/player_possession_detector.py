@@ -15,7 +15,9 @@ class PlayerPossessionDetector:
             possession_duration: Minimum duration (in frames) a player must maintain possession
                                  to filter out false positives during passes
         """
-        self.proximity_threshold = proximity_threshold
+        # For pitch coordinates, we need a much larger threshold
+        # Multiplying by 20 because pitch coordinates are in a much larger scale
+        self.proximity_threshold = proximity_threshold 
         self.possession_frames = possession_frames
         self.possession_duration = possession_duration
         
@@ -30,7 +32,7 @@ class PlayerPossessionDetector:
         self.previous_closest_players = []  # List of recently close players
         self.player_proximity_durations = {}  # Track how long each player has been close to ball
         
-        print(f"PlayerPossessionDetector initialized with threshold={proximity_threshold}, "
+        print(f"PlayerPossessionDetector initialized with threshold={self.proximity_threshold} (for pitch coordinates), "
               f"frames={possession_frames}, duration={possession_duration}")
     
     def update(self, detections, ball_position):
@@ -287,6 +289,11 @@ class PlayerPossessionDetector:
         y_offset += 25
         
         cv2.putText(vis_frame, f"Pos timer: {self.possession_timer}/{self.possession_duration}", 
+                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
+        
+        # Show threshold info
+        cv2.putText(vis_frame, f"Proximity threshold: {self.proximity_threshold:.1f}", 
                    (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
         y_offset += 25
         

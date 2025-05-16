@@ -11,9 +11,10 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.config_loader import ConfigLoader
-from models.detector import EnhancedObjectDetector
+from models.detector import EnhancedObjectDetector, FieldDetector
 from models.tracker import ObjectTracker
 from models.player_possession_detector import PlayerPossessionDetector
+from sports.common.view import ViewTransformer
 import supervision as sv
 
 
@@ -29,6 +30,13 @@ def test_player_possession(config_path, video_path):
         api_key=config['api_keys']['roboflow_api_key'],
         confidence_threshold=config['detection']['confidence_threshold'],
         device=config['performance']['device']
+    )
+    
+    # Initialize field detector for transformation
+    field_detector = FieldDetector(
+        model_id=config['models']['field_detection_model_id'],
+        api_key=config['api_keys']['roboflow_api_key'],
+        confidence_threshold=config['detection']['confidence_threshold']
     )
     
     # Initialize tracker
@@ -106,15 +114,87 @@ def test_player_possession(config_path, video_path):
                     elif category == 'referees':
                         detections[category] = merged[merged.class_id == player_detector.REFEREE_ID]
             
-            # Get ball position
+            # Detect field keypoints and create transformer
+            keypoints = field_detector.detect_keypoints(frame)
+            transformer = None
+            
+            if keypoints and len(keypoints.xy) > 0 and len(keypoints.xy[0]) >= 4:
+                # Filter keypoints by confidence
+                keypoint_threshold = config['detection']['keypoint_confidence_threshold']
+                filter_mask = keypoints.confidence[0] > keypoint_threshold
+                frame_reference_points = keypoints.xy[0][filter_mask]
+                
+                from sports.configs.soccer import SoccerPitchConfiguration
+                pitch_config = SoccerPitchConfiguration()
+                pitch_reference_points = np.array(pitch_config.vertices)[filter_mask]
+                
+                if len(frame_reference_points) >= 4:
+                    transformer = ViewTransformer(
+                        source=frame_reference_points,
+                        target=pitch_reference_points
+                    )
+            
+            # Get ball position and transform if possible
             ball_position = None
+            pitch_ball_position = None
+            
             if len(detections['ball']) > 0:
                 ball_xy = detections['ball'].get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
                 if len(ball_xy) > 0:
-                    ball_position = ball_xy[0]
+                    ball_position = ball_xy[0]  # Frame coordinates
+                    
+                    # Transform to pitch coordinates if possible
+                    if transformer is not None:
+                        pitch_ball_xy = transformer.transform_points(points=ball_xy)
+                        if len(pitch_ball_xy) > 0:
+                            pitch_ball_position = pitch_ball_xy[0]
+            
+            # Similarly transform player positions if possible
+            transformed_detections = None
+            if transformer is not None and pitch_ball_position is not None:
+                transformed_detections = {}
+                
+                for category in ['players', 'goalkeepers', 'referees']:
+                    if len(detections[category]) > 0:
+                        # Get positions in frame coordinates
+                        frame_positions = detections[category].get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+                        
+                        # Transform to pitch coordinates
+                        pitch_positions = transformer.transform_points(points=frame_positions)
+                        
+                        if len(pitch_positions) > 0:
+                            # Create a copy of the detections
+                            # transformed_detections[category] = detections[category].copy() // TODO: copy Doesnt work
+                            transformed_detections[category] = detections[category]
+                            
+                            # Replace xyxy with transformed positions
+                            # We'll create small boxes around the transformed positions
+                            # This is just for the possession detector to find closest player
+                            transformed_boxes = []
+                            for pos in pitch_positions:
+                                x, y = pos
+                                transformed_boxes.append([x-5, y-5, x+5, y+5])
+                            
+                            transformed_detections[category].xyxy = np.array(transformed_boxes)
+                        else:
+                            transformed_detections[category] = detections[category]
+                    else:
+                        transformed_detections[category] = detections[category]
+                
+                # Ball category just stays the same
+                transformed_detections['ball'] = detections['ball']
             
             # Update possession detector
-            possession_result = possession_detector.update(detections, ball_position)
+            possession_result = None
+            
+            if pitch_ball_position is not None and transformed_detections is not None:
+                # Use pitch coordinates for more accurate possession detection
+                possession_result = possession_detector.update(transformed_detections, pitch_ball_position)
+            elif ball_position is not None:
+                # Fallback to frame coordinates if transformation failed
+                possession_result = possession_detector.update(detections, ball_position)
+            else:
+                print("No ball position detected")
             
             # Create visualization
             # First annotate standard detections
@@ -157,19 +237,17 @@ def test_player_possession(config_path, video_path):
             cv2.putText(vis_frame, f"Frame: {frame_count} | Processing time: {proc_time:.3f}s", 
                       (10, height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            if possession_result['player_id'] is not None:
+            if possession_result and possession_result['player_id'] is not None:
                 cv2.putText(vis_frame, f"Current possession: Player #{possession_result['player_id']}", 
                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                
+                # Add coordinate type used
+                coord_type = "pitch" if pitch_ball_position is not None and transformed_detections is not None else "frame"
+                cv2.putText(vis_frame, f"Using {coord_type} coordinates", 
+                          (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             else:
                 cv2.putText(vis_frame, "No player has possession", 
                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            
-            # Display frame
-            display_frame = cv2.resize(vis_frame, (min(1280, width), min(720, height)))
-            # cv2.imshow('Player Possession Detection', display_frame)
-            # key = cv2.waitKey(1) & 0xFF
-            # if key == ord('q'):
-            #     break
             
             # Write to output video
             out.write(vis_frame)
@@ -186,7 +264,6 @@ def test_player_possession(config_path, video_path):
     # Cleanup
     cap.release()
     out.release()
-    # cv2.destroyAllWindows()
     
     print(f"Processing complete! Output saved to: {output_path}")
 
