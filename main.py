@@ -153,7 +153,7 @@ class FootballAI:
         print(f"  SAHI: {'Enabled' if self.config.get('sahi', {}).get('enable', False) else 'Disabled'}")
         print(f"  Pose Estimation: {'Enabled' if self.config.get('display', {}).get('show_pose', False) else 'Disabled'}")
         print(f"  Segmentation: {'Enabled' if self.config.get('display', {}).get('show_segmentation', False) else 'Disabled'}")
-        print(f"  Possession Detection: {'Enabled' if self.config.get('possession_detection', {}).get('enable', True) else 'Disabled'}")
+        print(f"  Player Possession Detection: {'Enabled' if self.config.get('possession_detection', {}).get('enable', True) else 'Disabled'}")
         
         processing_res = self.config.get('processing', {}).get('resolution', None)
         if processing_res:

@@ -25,7 +25,7 @@
 
 ## 🎯 Overview
 
-A powerful computer vision system that analyses football match videos to detect players, track ball movement, classify teams, and provide tactical visualisations - all in real-time! 
+A powerful computer vision system that analyses football match videos to detect players, track ball movement, classify teams, provide tactical visualisations, and identify which player has possession of the ball - all in real-time! 
 
 ## 🖼️ Preview
 
@@ -40,6 +40,9 @@ A powerful computer vision system that analyses football match videos to detect 
 ### 🎭 (Object Detection + Tracking) + Pose Estimation + Segmentation (Player #6)
 ![Football AI Preview](Preview_seg.png)
 
+### 🏆 Player Possession Detection
+![Football AI Preview](preview_possession.jpg)
+
 </div>
 
 ## ✨ Features
@@ -50,6 +53,7 @@ A powerful computer vision system that analyses football match videos to detect 
 - **🏟️ Field Detection**: Keypoint detection for perspective transformation
 - **🤸 Pose Estimation**: Human pose estimation with adaptive padding for better accuracy
 - **🎯 Player Segmentation**: Precise player segmentation with size-adaptive bounding boxes
+- **👐 Player Possession Detection**: Identify which player has the ball and highlight them in real-time
 - **🔲 SAHI Integration**: 2x2 slicing for enhanced detection accuracy
 - **📊 Tactical View**: Top-down pitch visualisation with real-time positions
 - **💾 Smart Caching**: Intelligent model caching for optimal performance
@@ -60,7 +64,7 @@ A powerful computer vision system that analyses football match videos to detect 
 ## 🎬 Demo Output
 
 The system generates a professional side-by-side view:
-- **Left Panel**: Original video with AI overlays and annotations
+- **Left Panel**: Original video with AI overlays and annotations, including possession highlighting
 - **Right Panel**: Top-down tactical view showing player positions
 
 ## 📋 Requirements
@@ -75,6 +79,7 @@ The system generates a professional side-by-side view:
 - 🎯 Only object detection models are purpose-trained
 - 🤸 Pose detection challenges with occlusion
 - 👥 Some player poses may not be detected accurately
+- 🏀 Ball possession is detected based on proximity, not visual contact
 
 ## 🚀 Quick Start
 
@@ -165,6 +170,17 @@ detection:
   segmentation_padding_ratio: 0.3
 ```
 
+### 🏆 Player Possession Detection
+```yaml
+possession_detection:
+  # Enable player possession detection
+  enable: true
+  # Distance in pixels for a player to be considered in possession
+  proximity_threshold: 50
+  # Number of frames a player needs to be closest to be in possession
+  possession_frames: 3
+```
+
 ### 🖥️ Processing Resolution
 ```yaml
 processing:
@@ -187,10 +203,10 @@ performance:
 python main.py --config config.yaml --output output_video.mp4
 ```
 
-### 🧪 Test Single Frame
+### 🧪 Test Player Possession Detection
 
 ```bash
-python tests/test_adaptive_padding.py --config config.yaml --image test_frame.jpg
+python tests/test_player_possession.py --config config.yaml --video test_video.mp4
 ```
 
 ### 🐳 Using Docker
@@ -217,19 +233,20 @@ football_ai/
 │   └── config_loader.py
 ├── 🤖 models/                 # AI models
 │   ├── __init__.py
-│   ├── detector.py         # Object detection with adaptive padding
-│   ├── classifier.py       # Team classification
-│   └── tracker.py          # Object tracking
+│   ├── detector.py            # Object detection with adaptive padding
+│   ├── classifier.py          # Team classification
+│   ├── tracker.py             # Object tracking
+│   └── player_possession_detector.py # Player possession detection
 ├── 🔄 processing/             # Core processing logic
 │   ├── __init__.py
-│   ├── frame_processor.py  # Frame processing pipeline
-│   ├── team_resolver.py    # Team assignment logic
-│   ├── sahi_processor.py   # SAHI support for small objects
+│   ├── frame_processor.py     # Frame processing pipeline
+│   ├── team_resolver.py       # Team assignment logic
+│   ├── sahi_processor.py      # SAHI support for small objects
 │   └── coordinate_transformer.py
 ├── 🎨 visualisation/          # Rendering and annotation
 │   ├── __init__.py
-│   ├── annotators.py       # Frame annotation
-│   └── pitch_renderer.py   # Tactical view rendering
+│   ├── annotators.py          # Frame annotation
+│   └── pitch_renderer.py      # Tactical view rendering
 ├── 💾 caching/               # Cache management
 │   ├── __init__.py
 │   └── cache_manager.py
@@ -239,6 +256,7 @@ football_ai/
 └── 🧪 tests/                 # Test scripts
     ├── __init__.py
     ├── test_adaptive_padding.py  # Test adaptive padding
+    ├── test_player_possession.py # Test player possession detection
     └── debug_single_frame.py
 ```
 
@@ -263,11 +281,15 @@ The system uses a sophisticated adaptive padding approach that:
 3. **Improves distant player detection**: Better pose estimation for players far from camera
 4. **Maintains object context**: Ensures enough surrounding information for accurate detection
 
-```python
-# Example of how adaptive padding works:
-size_factor = 1.0 / (box_width * box_height / (frame_width * frame_height) + 0.1)
-adaptive_padding = base_padding * (1 + padding_ratio * size_factor)
-```
+## 👐 Player Possession Detection
+
+The system includes a player possession detection feature that:
+
+1. **Identifies which player has the ball**: Uses proximity detection between player and ball
+2. **Tracks possession over time**: Requires consistent proximity over multiple frames
+3. **Visualizes possession**: Highlights the player with possession and displays their tracking ID
+4. **Works with all player types**: Supports players, goalkeepers, and referees
+5. **Configurable parameters**: Adjust proximity threshold and frames required for possession
 
 ## 🚀 Performance Tips
 
