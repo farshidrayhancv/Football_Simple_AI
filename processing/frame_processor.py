@@ -193,16 +193,28 @@ class FrameProcessor:
                 total_transformed += len(transformed_detections[cat])
             print(f"Total transformed detections: {total_transformed}")
         
-        # Process possession detection if enabled
-        possession_result = None
-        if self.enable_possession and self.possession_detector is not None:
-            if ball_position is not None and transformed_detections is not None:
-                # Use pitch coordinates for possession detection
-                possession_result = self.possession_detector.update(transformed_detections, ball_position)
-                print(f"Possession detection result: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
-            else:
-                print("No ball position detected for possession tracking")
-        
+            # Process possession detection if enabled
+            possession_result = None
+            if self.enable_possession and self.possession_detector is not None:
+                # Get coordinate system preference from config
+                coordinate_system = self.config.get('possession_detection', {}).get('coordinate_system', 'pitch')
+                
+                if coordinate_system == "pitch" and ball_position is not None and transformed_detections is not None:
+                    # Use pitch coordinates for possession detection
+                    possession_result = self.possession_detector.update(transformed_detections, ball_position)
+                    print(f"Possession detection using pitch coordinates: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
+                elif coordinate_system == "frame" and ball_position is not None:
+                    # Use frame coordinates for possession detection
+                    # Here we use the original frame detections and ball position
+                    frame_ball_position = ball_xy[0] if len(ball_xy) > 0 else None
+                    if frame_ball_position is not None:
+                        possession_result = self.possession_detector.update(detections, frame_ball_position)
+                        print(f"Possession detection using frame coordinates: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
+                    else:
+                        print("No ball position detected for possession tracking (frame coordinates)")
+                else:
+                    print("No ball position detected for possession tracking")
+            
         # Calculate statistics
         pose_stats = None
         seg_stats = None

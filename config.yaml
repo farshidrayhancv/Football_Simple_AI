@@ -6,14 +6,15 @@ api_keys:
   roboflow_api_key: ""
 
 
+
 # Model Configuration
 models:
   player_detection_model_id: "football-players-detection-3zvbc/11"
   field_detection_model_id: "football-field-detection-f07vi/14"
-  siglip_model_path: "google/siglip-base-patch16-224"
-  pose_model: "yolo11m-pose.pt" ##TODO: Needs to be trained on Player Pose Dataset See here: https://worldpose.ait.ethz.ch/
+  siglip_model_path: "google/siglip2-base-patch16-224"
+  pose_model: "yolo11s-pose.pt" ##TODO: Needs to be trained on Player Pose Dataset See here: https://worldpose.ait.ethz.ch/
   # SAM model for segmentation (sam2.1_b.pt, sam2.1_l.pt, sam2.1_s.pt)
-  sam_model: "sam2.1_l.pt"
+  sam_model: "sam2.1_s.pt"
 
 # Video Processing Settings
 video:
@@ -33,14 +34,16 @@ detection:
   keypoint_confidence_threshold: 0.5
   # Pose detection confidence threshold
   pose_confidence_threshold: 0.5
-  # Padding for bounding boxes before SAM segmentation (in pixels)
-  segmentation_padding: 15
-
+  # Adaptive padding for bounding boxes for pose estimation
+  # Pose detection confidence threshold
+  pose_confidence_threshold: 0.5
+  # Padding ratio (percentage of box size) for both pose and segmentation
+  padding_ratio: 0.1  # 10% padding
 
 # SAHI (Slicing Adaptive Inference) Settings
 sahi:
   # Enable SAHI for better small object detection
-  enable: true
+  enable: false
   # Slice configuration (2x2 means 4 slices)
   slice_rows: 2
   slice_cols: 2
@@ -70,13 +73,16 @@ display:
   # Show or hide elements
   show_tracking_ids: true
   show_ball: true
-  show_voronoi: false
+  show_voronoi: true
   # Enable pose estimation visualization
   show_pose: true
   # Enable segmentation visualization
   show_segmentation: true
   # Segmentation transparency (0.0 - 1.0)
   segmentation_alpha: 0.6
+  # Enable possession detection visualization
+  show_possession_detection: true
+
 
   # Colors (in hex)
   team_colors:
@@ -98,6 +104,30 @@ performance:
   use_gpu: true
   device: "cuda"  # or "cpu"
   batch_size: 32
+  
+
+possession_detection:
+  # Enable player possession detection
+  enable: true
+  # Coordinate system for possession detection: "pitch" or "frame"
+  coordinate_system: "frame"
+  # Distance in pitch coordinates for a player to be considered in possession (used when coordinate_system is "pitch")
+  proximity_threshold: 250
+  # Distance in frame pixels for a player to be considered in possession (used when coordinate_system is "frame")
+  frame_proximity_threshold: 30
+  # Number of frames a player needs to be closest to be in possession
+  possession_frames: 2
+  # Number of frames a player needs to maintain possession (filter out false positives)
+  possession_duration: 3
+  # Number of frames the ball has to be alone to consider no possession
+  no_possession_frames: 10
+
+# Processing resolution settings
+# Uncomment and set values to enable processing at specific resolution
+processing:
+  # Set the resolution for processing - lower for faster performance
+  # All results will be scaled back to original video resolution
+  resolution: [1280, 1280]  # Width, height
 
 # Caching Settings
 caching:

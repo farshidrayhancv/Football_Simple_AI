@@ -91,18 +91,27 @@ class FootballAI:
         # Initialize player possession detector
         if self.config.get('possession_detection', {}).get('enable', True):
             print("Initializing player possession detector")
+            coordinate_system = self.config.get('possession_detection', {}).get('coordinate_system', 'pitch')
+            proximity_threshold = self.config.get('possession_detection', {}).get('proximity_threshold', 250)
+            frame_proximity_threshold = self.config.get('possession_detection', {}).get('frame_proximity_threshold', 30)
+            possession_frames = self.config.get('possession_detection', {}).get('possession_frames', 3)
+            possession_duration = self.config.get('possession_detection', {}).get('possession_duration', 3)
+            no_possession_frames = self.config.get('possession_detection', {}).get('no_possession_frames', 10)
+            
             self.possession_detector = PlayerPossessionDetector(
-                proximity_threshold=self.config.get('possession_detection', {}).get('proximity_threshold', 50),
-                possession_frames=self.config.get('possession_detection', {}).get('possession_frames', 3),
-                possession_duration=self.config.get('possession_detection', {}).get('possession_duration', 3),
-                no_possession_frames=self.config.get('possession_detection', {}).get('no_possession_frames', 10)
+                proximity_threshold=proximity_threshold,
+                frame_proximity_threshold=frame_proximity_threshold,
+                coordinate_system=coordinate_system,
+                possession_frames=possession_frames,
+                possession_duration=possession_duration,
+                no_possession_frames=no_possession_frames
             )
         else:
             print("Player possession detection disabled in config")
             self.possession_detector = None
-            self.config['possession_detection']['enable'] = False    
+            self.config['possession_detection']['enable'] = False
 
-            
+
     def _init_processors(self):
         """Initialize processors."""
         self.frame_processor = FrameProcessor(

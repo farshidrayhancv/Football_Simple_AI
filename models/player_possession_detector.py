@@ -6,19 +6,23 @@ import supervision as sv
 
 
 class PlayerPossessionDetector:
-    def __init__(self, proximity_threshold=50, possession_frames=3, possession_duration=10, no_possession_frames=10):
+    def __init__(self, proximity_threshold=50, frame_proximity_threshold=30, 
+                 coordinate_system="pitch", possession_frames=3, 
+                 possession_duration=10, no_possession_frames=10):
         """Initialize player possession detector.
         
         Args:
-            proximity_threshold: Distance in pixels for a player to be considered in proximity
+            proximity_threshold: Distance in pitch coordinates for a player to be considered in proximity
+            frame_proximity_threshold: Distance in frame pixels for a player to be considered in proximity
+            coordinate_system: "pitch" or "frame" - which coordinate system to use for proximity detection
             possession_frames: Number of frames a player needs to be closest to be considered for possession
             possession_duration: Minimum duration (in frames) a player must maintain possession
                                  to filter out false positives during passes
             no_possession_frames: Number of frames the ball has to be alone to consider no possession
         """
-        # For pitch coordinates, we need a much larger threshold
-        # Multiplying by 20 because pitch coordinates are in a much larger scale
-        self.proximity_threshold = proximity_threshold 
+        self.proximity_threshold = proximity_threshold
+        self.frame_proximity_threshold = frame_proximity_threshold
+        self.coordinate_system = coordinate_system
         self.possession_frames = possession_frames
         self.possession_duration = possession_duration
         self.no_possession_frames = no_possession_frames
@@ -35,7 +39,8 @@ class PlayerPossessionDetector:
         self.previous_closest_players = []  # List of recently close players
         self.player_proximity_durations = {}  # Track how long each player has been close to ball
         
-        print(f"PlayerPossessionDetector initialized with threshold={self.proximity_threshold} (for pitch coordinates), "
+        print(f"PlayerPossessionDetector initialized with coordinate_system={coordinate_system}, "
+              f"pitch_threshold={proximity_threshold}, frame_threshold={frame_proximity_threshold}, "
               f"frames={possession_frames}, duration={possession_duration}, no_possession={no_possession_frames}")
     
     def update(self, detections, ball_position):
@@ -141,13 +146,17 @@ class PlayerPossessionDetector:
             'proximity_duration': self.player_proximity_durations.get(player_id, 0),
             'candidate_counter': self.candidate_counter,
             'possession_timer': self.possession_timer,
-            'ball_alone_counter': self.ball_alone_counter
+            'ball_alone_counter': self.ball_alone_counter,
+            'coordinate_system': self.coordinate_system
         }
     
     def _find_closest_player(self, detections, ball_position):
         """Find the player closest to the ball."""
         closest_distance = float('inf')
         closest_player = None
+        
+        # Use appropriate threshold based on coordinate system
+        threshold = self.frame_proximity_threshold if self.coordinate_system == "frame" else self.proximity_threshold
         
         # Process players, goalkeepers, and referees
         for player_type in ['players', 'goalkeepers', 'referees']:
@@ -171,13 +180,15 @@ class PlayerPossessionDetector:
             
             for i, (pos, team_id, tracker_id) in enumerate(zip(player_positions, team_ids, tracker_ids)):
                 distance = np.linalg.norm(pos - ball_position)
-                if distance < closest_distance and distance < self.proximity_threshold:
+                if distance < closest_distance and distance < threshold:
                     closest_distance = distance
                     closest_player = (int(team_id), int(tracker_id), distance)
         
         if closest_player:
             team_id, player_id, distance = closest_player
-            print(f"Closest to ball: Player #{player_id} (team {team_id}) at distance {distance:.2f}")
+            coordinate_type = "frame" if self.coordinate_system == "frame" else "pitch"
+            print(f"Closest to ball: Player #{player_id} (team {team_id}) at distance {distance:.2f} "
+                  f"({coordinate_type} coordinates)")
             
         return closest_player
     
@@ -232,7 +243,8 @@ class PlayerPossessionDetector:
                                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
                             
                             # Draw "POSSESSION" label
-                            cv2.putText(vis_frame, "POSSESSION", (box[0], box[1] - 10),
+                            coord_text = f"POSSESSION ({self.coordinate_system})"
+                            cv2.putText(vis_frame, coord_text, (box[0], box[1] - 10),
                                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
                                        
                             highlighted = True
@@ -260,7 +272,7 @@ class PlayerPossessionDetector:
         
         # Create semi-transparent overlay for stats panel
         height, width = vis_frame.shape[:2]
-        panel_height = 220
+        panel_height = 240  # Increased for extra info
         panel_width = 300
         panel_x = width - panel_width - 10
         panel_y = 10
@@ -277,6 +289,17 @@ class PlayerPossessionDetector:
         
         # Draw possession information
         y_offset = panel_y + 50
+        
+        # Show coordinate system
+        cv2.putText(vis_frame, f"Coordinate System: {self.coordinate_system}", 
+                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
+        
+        # Show active threshold
+        active_threshold = self.frame_proximity_threshold if self.coordinate_system == "frame" else self.proximity_threshold
+        cv2.putText(vis_frame, f"Active Threshold: {active_threshold}", 
+                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+        y_offset += 25
         
         if self.current_possession is not None:
             cv2.putText(vis_frame, f"Current: Player #{self.current_possession}", 
@@ -300,11 +323,6 @@ class PlayerPossessionDetector:
         
         # Add ball alone counter
         cv2.putText(vis_frame, f"Ball alone: {self.ball_alone_counter}/{self.no_possession_frames}", 
-                   (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-        y_offset += 25
-        
-        # Show threshold info
-        cv2.putText(vis_frame, f"Proximity threshold: {self.proximity_threshold:.1f}", 
                    (panel_x + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
         y_offset += 25
         
