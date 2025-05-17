@@ -38,6 +38,20 @@ class FrameProcessor:
         """Process a single frame at standardized resolution."""
         original_height, original_width = frame.shape[:2]
         
+        # Initialize results with default values in case we need to skip processing
+        detections = {}
+        for cat in ['players', 'goalkeepers', 'referees', 'ball']:
+            detections[cat] = sv.Detections.empty()
+        transformer = None
+        poses = None
+        pose_stats = None
+        segmentations = None
+        seg_stats = None
+        sahi_stats = None
+        possession_result = None
+        ball_xy = []  # Initialize ball_xy as empty list
+        ball_position = None
+        
         # Resize frame to processing resolution if specified
         scale_factor = 1.0
         if self.processing_resolution:
@@ -48,6 +62,35 @@ class FrameProcessor:
         else:
             processing_frame = frame
             scale_factor = (1.0, 1.0)
+        
+        # GATEWAY CHECK: Field detection and transformation (use original frame)
+        # Try to detect field keypoints first - this acts as our gateway
+        key_points = self.field_detector.detect_keypoints(frame)
+        
+        # Debug keypoints
+        if key_points is not None and len(key_points.xy) > 0:
+            print(f"Detected {len(key_points.xy[0])} field keypoints")
+        else:
+            print("No field keypoints detected")
+            # Return early with empty/default results
+            return detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats, possession_result
+        
+        # Check if we have enough keypoints to create a transformation
+        transformer = self.coordinate_transformer.update(key_points)
+        
+        if transformer is None:
+            print("Failed to create field transformation, skipping frame")
+            # Return early with empty/default results
+            return detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats, possession_result
+        else:
+            print("Field transformation matrix created successfully")
+            self.tracker.update_transformation(transformer.m)
+            # Use averaged transformation
+            averaged_matrix = self.tracker.get_averaged_transformation()
+            if averaged_matrix is not None:
+                transformer.m = averaged_matrix
+        
+        # If we get here, we have a valid transformer, so proceed with processing
         
         # Process with SAHI if enabled
         if self.enable_sahi:
@@ -119,11 +162,7 @@ class FrameProcessor:
             'referees': referees
         }
         
-        # Field detection and transformation (use original frame)
-        transformer = self._update_field_transformation(frame)
-        
         # Get ball position and transform to pitch coordinates
-        ball_position = None
         if len(ball_detections) > 0:
             # Get ball anchor coordinates (BOTTOM_CENTER)
             ball_xy = ball_detections.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
@@ -131,95 +170,81 @@ class FrameProcessor:
             if len(ball_xy) > 0:
                 print(f"Ball frame position: {ball_xy[0]}")
                 
-                # Transform to pitch coordinates if transformer available
-                if transformer is not None:
-                    pitch_ball_xy = transformer.transform_points(points=ball_xy)
-                    if len(pitch_ball_xy) > 0:
-                        ball_position = pitch_ball_xy[0]
-                        print(f"Ball pitch position: {ball_position}")
-                        self.tracker.update_ball_trail(ball_position)
-                    else:
-                        print("Failed to transform ball coordinates")
+                # Transform to pitch coordinates
+                pitch_ball_xy = transformer.transform_points(points=ball_xy)
+                if len(pitch_ball_xy) > 0:
+                    ball_position = pitch_ball_xy[0]
+                    print(f"Ball pitch position: {ball_position}")
+                    self.tracker.update_ball_trail(ball_position)
                 else:
-                    print("No transformer available to convert to pitch coordinates")
+                    print("Failed to transform ball coordinates")
         
-        # Similarly transform player positions to pitch coordinates for possession detection
-        transformed_detections = None
-        if transformer is not None:
-            transformed_detections = {}
-            
-            for category in ['players', 'goalkeepers', 'referees']:
-                if len(detections[category]) > 0:
-                    # Get positions in frame coordinates
-                    frame_positions = detections[category].get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
-                    
-                    # Transform to pitch coordinates
-                    pitch_positions = transformer.transform_points(points=frame_positions)
-                    
-                    if len(pitch_positions) > 0:
-                        # Create a new detections object for transformed coordinates
-                        # We cannot use copy() as it doesn't exist
-                        
-                        # First, create small boxes around each transformed position
-                        transformed_boxes = []
-                        for pos in pitch_positions:
-                            x, y = pos
-                            transformed_boxes.append([x-5, y-5, x+5, y+5])  # Small box around position
-                        
-                        # Get original detection data to copy
-                        orig_confidence = detections[category].confidence
-                        orig_class_id = detections[category].class_id
-                        orig_tracker_id = detections[category].tracker_id
-                        
-                        # Create new detection object with transformed positions
-                        transformed_detections[category] = sv.Detections(
-                            xyxy=np.array(transformed_boxes),
-                            confidence=orig_confidence.copy() if orig_confidence is not None else None,
-                            class_id=orig_class_id.copy() if orig_class_id is not None else None,
-                            tracker_id=orig_tracker_id.copy() if orig_tracker_id is not None else None
-                        )
-                    else:
-                        print(f"Failed to transform {category} coordinates")
-                        transformed_detections[category] = sv.Detections.empty()
-                else:
-                    transformed_detections[category] = sv.Detections.empty()
-            
-            # Ball detection is kept as is, we already have the transformed position
-            transformed_detections['ball'] = ball_detections
-            
-            # Debug transformed detections
-            total_transformed = 0
-            for cat in transformed_detections:
-                total_transformed += len(transformed_detections[cat])
-            print(f"Total transformed detections: {total_transformed}")
+        # Transform player positions to pitch coordinates for possession detection
+        transformed_detections = {}
         
-            # Process possession detection if enabled
-            possession_result = None
-            if self.enable_possession and self.possession_detector is not None:
-                # Get coordinate system preference from config
-                coordinate_system = self.config.get('possession_detection', {}).get('coordinate_system', 'pitch')
+        for category in ['players', 'goalkeepers', 'referees']:
+            if len(detections[category]) > 0:
+                # Get positions in frame coordinates
+                frame_positions = detections[category].get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
                 
-                if coordinate_system == "pitch" and ball_position is not None and transformed_detections is not None:
-                    # Use pitch coordinates for possession detection
-                    possession_result = self.possession_detector.update(transformed_detections, ball_position)
-                    print(f"Possession detection using pitch coordinates: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
-                elif coordinate_system == "frame" and ball_position is not None:
-                    # Use frame coordinates for possession detection
-                    # Here we use the original frame detections and ball position
-                    frame_ball_position = ball_xy[0] if len(ball_xy) > 0 else None
-                    if frame_ball_position is not None:
-                        possession_result = self.possession_detector.update(detections, frame_ball_position)
-                        print(f"Possession detection using frame coordinates: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
-                    else:
-                        print("No ball position detected for possession tracking (frame coordinates)")
+                # Transform to pitch coordinates
+                pitch_positions = transformer.transform_points(points=frame_positions)
+                
+                if len(pitch_positions) > 0:
+                    # Create a new detections object for transformed coordinates
+                    
+                    # First, create small boxes around each transformed position
+                    transformed_boxes = []
+                    for pos in pitch_positions:
+                        x, y = pos
+                        transformed_boxes.append([x-5, y-5, x+5, y+5])  # Small box around position
+                    
+                    # Get original detection data to copy
+                    orig_confidence = detections[category].confidence
+                    orig_class_id = detections[category].class_id
+                    orig_tracker_id = detections[category].tracker_id
+                    
+                    # Create new detection object with transformed positions
+                    transformed_detections[category] = sv.Detections(
+                        xyxy=np.array(transformed_boxes),
+                        confidence=orig_confidence.copy() if orig_confidence is not None else None,
+                        class_id=orig_class_id.copy() if orig_class_id is not None else None,
+                        tracker_id=orig_tracker_id.copy() if orig_tracker_id is not None else None
+                    )
                 else:
-                    print("No ball position detected for possession tracking")
-            
-        # Calculate statistics
-        pose_stats = None
-        seg_stats = None
-        sahi_stats = None
+                    print(f"Failed to transform {category} coordinates")
+                    transformed_detections[category] = sv.Detections.empty()
+            else:
+                transformed_detections[category] = sv.Detections.empty()
         
+        # Ball detection is kept as is, we already have the transformed position
+        transformed_detections['ball'] = ball_detections
+        
+        # Debug transformed detections
+        total_transformed = 0
+        for cat in transformed_detections:
+            total_transformed += len(transformed_detections[cat])
+        print(f"Total transformed detections: {total_transformed}")
+        
+        # Process possession detection if enabled
+        if self.enable_possession and self.possession_detector is not None:
+            # Get coordinate system preference from config
+            coordinate_system = self.config.get('possession_detection', {}).get('coordinate_system', 'pitch')
+            
+            if coordinate_system == "pitch" and ball_position is not None:
+                # Use pitch coordinates for possession detection
+                possession_result = self.possession_detector.update(transformed_detections, ball_position)
+                print(f"Possession detection using pitch coordinates: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
+            elif coordinate_system == "frame" and len(ball_xy) > 0:
+                # Use frame coordinates for possession detection
+                # Here we use the original frame detections and ball position
+                frame_ball_position = ball_xy[0]
+                possession_result = self.possession_detector.update(detections, frame_ball_position)
+                print(f"Possession detection using frame coordinates: player_id={possession_result.get('player_id')}, team_id={possession_result.get('team_id')}")
+            else:
+                print("No ball position detected for possession tracking")
+        
+        # Calculate statistics
         if poses:
             pose_stats = self._calculate_pose_stats(poses)
         

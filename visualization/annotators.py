@@ -16,18 +16,25 @@ class FootballAnnotator:
         
         print(f"FootballAnnotator initialized with possession_detection={self.enable_possession}")
         
-        # Team colors for pose visualization
-        self.team1_color = self._hex_to_rgb(config['display']['team_colors']['team_1'])
-        self.team2_color = self._hex_to_rgb(config['display']['team_colors']['team_2'])
-        self.default_pose_color = (0, 255, 0)  # Green
+        # Load team colors for pose visualization (in BGR format)
+        self.team1_color = self._hex_to_bgr(config['display']['team_colors']['team_1'])
+        self.team2_color = self._hex_to_bgr(config['display']['team_colors']['team_2'])
+        self.referee_color = self._hex_to_bgr(config['display']['referee_color'])
+        self.ball_color = self._hex_to_bgr(config['display']['ball_color'])
+        self.default_pose_color = (0, 255, 0)  # Green in BGR
         
         # Segmentation transparency
         self.segmentation_alpha = config.get('display', {}).get('segmentation_alpha', 0.6)
     
-    def _hex_to_rgb(self, hex_color):
-        """Convert hex color to RGB tuple."""
+    def _hex_to_bgr(self, hex_color):
+        """Convert hex color to BGR tuple for OpenCV."""
         hex_color = hex_color.lstrip('#')
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        # Get RGB values
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        # Return BGR for OpenCV
+        return (b, g, r)
     
     def _init_annotators(self):
         """Initialize supervision annotators."""
@@ -115,12 +122,16 @@ class FootballAnnotator:
             for i, mask in enumerate(segmentations['players']):
                 if mask is not None and i < len(players_detections):
                     try:
-                        # Get color based on team
+                        # Get color based on team from config
                         if hasattr(players_detections, 'class_id') and players_detections.class_id is not None:
-                            team_id = players_detections.class_id[i] if i < len(players_detections.class_id) else 0
+                            team_id = int(players_detections.class_id[i]) if i < len(players_detections.class_id) else 0
+                            team_key = f"team_{team_id + 1}"  # team_1 or team_2
+                            hex_color = self.config['display']['team_colors'][team_key]
+                            color = self._hex_to_bgr(hex_color)
                         else:
-                            team_id = 0
-                        color = self.team1_color if team_id == 0 else self.team2_color
+                            # Default to team 1 color if team can't be determined
+                            hex_color = self.config['display']['team_colors']['team_1']
+                            color = self._hex_to_bgr(hex_color)
                         
                         # Apply mask with color
                         mask_bool = mask > 0.5 if isinstance(mask, np.ndarray) else mask
@@ -134,20 +145,58 @@ class FootballAnnotator:
             for i, mask in enumerate(segmentations['goalkeepers']):
                 if mask is not None and i < len(goalkeepers_detections):
                     try:
-                        # Get color based on team
+                        # Get color based on team from config
                         if hasattr(goalkeepers_detections, 'class_id') and goalkeepers_detections.class_id is not None:
-                            team_id = goalkeepers_detections.class_id[i] if i < len(goalkeepers_detections.class_id) else 0
+                            team_id = int(goalkeepers_detections.class_id[i]) if i < len(goalkeepers_detections.class_id) else 0
+                            team_key = f"team_{team_id + 1}"  # team_1 or team_2
+                            hex_color = self.config['display']['team_colors'][team_key]
+                            color = self._hex_to_bgr(hex_color)
                         else:
-                            team_id = 0
-                        color = self.team1_color if team_id == 0 else self.team2_color
+                            # Default to team 1 color if team can't be determined
+                            hex_color = self.config['display']['team_colors']['team_1']
+                            color = self._hex_to_bgr(hex_color)
                         
-                        # Apply mask with color (brighter for goalkeepers)
+                        # Make goalkeepers slightly brighter
                         brighter_color = tuple(min(255, int(c * 1.3)) for c in color)
+                        
+                        # Apply mask with color
                         mask_bool = mask > 0.5 if isinstance(mask, np.ndarray) else mask
                         overlay[mask_bool] = brighter_color
                     except Exception as e:
                         print(f"Error drawing goalkeeper segmentation {i}: {e}")
         
+        # Draw segmentation masks for referees
+        if 'referees' in segmentations and segmentations['referees']:
+            referees_detections = detections['referees']
+            for i, mask in enumerate(segmentations['referees']):
+                if mask is not None and i < len(referees_detections):
+                    try:
+                        # Get referee color directly from config
+                        hex_color = self.config['display']['referee_color']
+                        color = self._hex_to_bgr(hex_color)
+                        
+                        # Apply mask with color
+                        mask_bool = mask > 0.5 if isinstance(mask, np.ndarray) else mask
+                        overlay[mask_bool] = color
+                    except Exception as e:
+                        print(f"Error drawing referee segmentation {i}: {e}")
+        
+        # Draw segmentation for ball if available
+        if 'ball' in segmentations and segmentations['ball']:
+            ball_detections = detections['ball']
+            for i, mask in enumerate(segmentations['ball']):
+                if mask is not None and i < len(ball_detections):
+                    try:
+                        # Get ball color directly from config
+                        hex_color = self.config['display']['ball_color']
+                        color = self._hex_to_bgr(hex_color)
+                        
+                        # Apply mask with color
+                        mask_bool = mask > 0.5 if isinstance(mask, np.ndarray) else mask
+                        overlay[mask_bool] = color
+                    except Exception as e:
+                        print(f"Error drawing ball segmentation {i}: {e}")
+    
         # Blend overlay with original frame
         frame = cv2.addWeighted(frame, 1 - self.segmentation_alpha, overlay, self.segmentation_alpha, 0)
         return frame
@@ -229,6 +278,17 @@ class FootballAnnotator:
                         frame = pose_drawer.draw_pose(frame, pose, color=color, thickness=3)
                     except Exception as e:
                         print(f"Error drawing goalkeeper pose {i}: {e}")
+        
+        # Draw poses for referees
+        if 'referees' in poses and poses['referees']:
+            referees_detections = detections['referees']
+            for i, pose in enumerate(poses['referees']):
+                if pose is not None and i < len(referees_detections):
+                    try:
+                        # Use referee color from config
+                        frame = pose_drawer.draw_pose(frame, pose, color=self.referee_color, thickness=2)
+                    except Exception as e:
+                        print(f"Error drawing referee pose {i}: {e}")
         
         return frame
     
