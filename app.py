@@ -34,7 +34,7 @@ def hex_to_bgr(hex_color):
 def load_config():
     """Load configuration from config.yaml."""
     try:
-        with open("config_temp.yaml", 'r') as f:
+        with open("config.yaml", 'r') as f:
             return yaml.safe_load(f)
     except Exception as e:
         st.error(f"Error loading config.yaml: {e}")
