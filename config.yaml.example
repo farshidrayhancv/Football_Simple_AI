@@ -1,0 +1,73 @@
+api_keys:
+  huggingface_token: ""
+  roboflow_api_key: ""
+ball_tracking:
+  avg_frames: 5
+  enable: true
+  trail_length: 10
+caching:
+  cache_directory: ''
+  enable_team_classifier_cache: true
+detection:
+  confidence_threshold: 0.3
+  keypoint_confidence_threshold: 0.5
+  nms_threshold: 0.5
+  padding_ratio: 0.1
+  pose_confidence_threshold: 0.5
+display:
+  backend: opencv
+  ball_color: '#FFD700'
+  original_frame_height: 600
+  original_frame_width: 800
+  pitch_view_height: 800
+  pitch_view_width: 600
+  referee_color: '#FFD700'
+  segmentation_alpha: 0.6
+  show_ball: true
+  show_pose: true
+  show_possession_detection: true
+  show_segmentation: true
+  show_tracking_ids: true
+  show_voronoi: true
+  team_colors:
+    team_1: '#00BFFF'
+    team_2: '#FF1493'
+models:
+  field_detection_model_id: football-field-detection-f07vi/14
+  player_detection_model_id: football-players-detection-3zvbc/11
+  pose_model: yolo11s-pose.pt
+  sam_model: sam2.1_s.pt
+  siglip_model_path: google/siglip-base-patch16-256
+performance:
+  batch_size: 32
+  device: cuda
+  use_gpu: true
+possession_detection:
+  coordinate_system: frame
+  enable: true
+  frame_proximity_threshold: 30
+  no_possession_frames: 15
+  possession_duration: 3
+  possession_frames: 1
+  proximity_threshold: 250
+processing:
+  resolution:
+  - 1080
+  - 1080
+sahi:
+  enable: false
+  overlap_ratio: 0.2
+  postprocess_match_threshold: 0.5
+  postprocess_type: NMU
+  slice_cols: 2
+  slice_height: 640
+  slice_rows: 2
+  slice_width: 640
+tracking:
+  max_distance_threshold: 500
+  tracker_type: bytetrack
+video:
+  display_fps: 30
+  input_path: videos/0bfacc_0.mp4
+  output_path: /home/farshid/proj/Football/videos/
+  stride: 30

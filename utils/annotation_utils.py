@@ -171,10 +171,11 @@ class AnnotationStore:
         return result
     
     def save_frame_annotations(self, frame_index: int, detections: Dict[str, sv.Detections], 
-                              poses: Optional[Dict[str, List[Dict[str, Any]]]] = None,
-                              segmentations: Optional[Dict[str, List[np.ndarray]]] = None,
-                              transformer_matrix: Optional[np.ndarray] = None,
-                              possession_result: Optional[Dict[str, Any]] = None):
+                            poses: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+                            segmentations: Optional[Dict[str, List[np.ndarray]]] = None,
+                            transformer_matrix: Optional[np.ndarray] = None,
+                            field_keypoints: Optional[Dict[str, Any]] = None,
+                            possession_result: Optional[Dict[str, Any]] = None):
         """
         Save annotations for a single frame.
         
@@ -184,6 +185,7 @@ class AnnotationStore:
             poses: Dictionary of pose data by category
             segmentations: Dictionary of segmentation masks by category
             transformer_matrix: Transformation matrix for pitch coordinates
+            field_keypoints: Field keypoints for transformation
             possession_result: Player possession detection result
         """
         # Convert detections to dictionary
@@ -203,6 +205,7 @@ class AnnotationStore:
             "poses": poses_dict,
             "segmentations": segmentations_dict,
             "transformer_matrix": transformer_matrix.tolist() if transformer_matrix is not None else None,
+            "field_keypoints": field_keypoints,  # Add field keypoints
             "possession": possession_result
         }
         
@@ -219,6 +222,7 @@ class AnnotationStore:
                 "detection": True,
                 "pose": poses is not None,
                 "segmentation": segmentations is not None,
+                "field_keypoints": field_keypoints is not None,
                 "possession": possession_result is not None
             }
         )

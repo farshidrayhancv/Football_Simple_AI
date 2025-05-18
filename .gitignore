@@ -3,7 +3,7 @@ caching/*
 .cache/
 annotatations/*
 *.json
-
+*.jpg
 *.mp4
 __pycache__
 
