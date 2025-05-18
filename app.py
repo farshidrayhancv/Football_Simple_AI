@@ -1,591 +1,322 @@
-import tempfile
-import numpy as np
 import os
 import sys
-import yaml
-import torch
+import tempfile
+import subprocess
 import streamlit as st
-from streamlit_image_coordinates import streamlit_image_coordinates
-import cv2
-from tqdm import tqdm
+import time
+import yaml
+import shutil
+from PIL import Image
 
-# Display version info and setup instructions at startup
-st.set_page_config(page_title="Football AI - Advanced Tactical Analysis", layout="wide", initial_sidebar_state="expanded")
+# Set page config
+st.set_page_config(page_title="Football AI - Live Viewer", layout="wide")
 
-# Check NumPy version and warn if needed
-import numpy as np
-numpy_version = np.__version__
-if numpy_version.startswith("2."):
-    st.warning(f"""
-    ⚠️ NumPy version {numpy_version} detected. This may cause compatibility issues.
-    
-    Some modules require NumPy 1.x. Please consider running:
-    ```
-    pip install numpy==1.24.3
-    ```
-    """)
+# App title
+st.title("Football AI - Live Viewer")
+st.markdown("Upload a video and see frames as they're processed")
 
-# Handle module imports with error catching
-@st.cache_resource
-def import_football_ai_modules():
+# Function to update config with new video path
+def update_config_video_path(config_path, video_path):
+    """Update the video input_path in the config file."""
     try:
-        # Import Football AI modules with error handling
-        from config.config_loader import ConfigLoader
-        from models.detector import EnhancedObjectDetector, FieldDetector
-        from models.classifier import TeamClassifierModule
-        from models.tracker import ObjectTracker
-        from models.player_possession_detector import PlayerPossessionDetector
-        from processing.frame_processor import FrameProcessor
-        from visualization.annotators import FootballAnnotator
-        from visualization.pitch_renderer import PitchRenderer
-        from caching.cache_manager import CacheManager
-        from utils.video_utils import VideoProcessor
-        
-        return {
-            'ConfigLoader': ConfigLoader,
-            'EnhancedObjectDetector': EnhancedObjectDetector,
-            'FieldDetector': FieldDetector,
-            'TeamClassifierModule': TeamClassifierModule,
-            'ObjectTracker': ObjectTracker,
-            'PlayerPossessionDetector': PlayerPossessionDetector,
-            'FrameProcessor': FrameProcessor,
-            'FootballAnnotator': FootballAnnotator,
-            'PitchRenderer': PitchRenderer,
-            'CacheManager': CacheManager,
-            'VideoProcessor': VideoProcessor,
-            'import_successful': True
-        }
-    except Exception as e:
-        st.error(f"Error importing Football AI modules: {str(e)}")
-        return {'import_successful': False, 'error': str(e)}
-
-def load_config(config_path):
-    """Load configuration from YAML file."""
-    try:
+        # Read existing config
         with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
+            config = yaml.safe_load(f)
+        
+        # Update video input path
+        if 'video' not in config:
+            config['video'] = {}
+        config['video']['input_path'] = video_path
+        
+        # Create a backup
+        backup_path = f"{config_path}.bak"
+        shutil.copy2(config_path, backup_path)
+        
+        # Write updated config
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+        
+        return True
     except Exception as e:
-        st.error(f"Error loading config: {e}")
-        return None
+        st.error(f"Failed to update config: {e}")
+        return False
 
-def initialize_football_ai(config, modules):
-    """Initialize Football AI components."""
-    if not modules.get('import_successful', False):
-        st.error("Cannot initialize Football AI: Module import failed")
-        return None
-    
-    try:
-        # Set CUDA environment variables if GPU available
-        if torch.cuda.is_available():
-            os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-        
-        # Initialize object detectors
-        player_detector = modules['EnhancedObjectDetector'](
-            model_id=config['models']['player_detection_model_id'],
-            api_key=config['api_keys']['roboflow_api_key'],
-            confidence_threshold=config['detection']['confidence_threshold'],
-            enable_pose=config.get('display', {}).get('show_pose', True),
-            enable_segmentation=config.get('display', {}).get('show_segmentation', True),
-            pose_model=config.get('models', {}).get('pose_model', 'yolo11m-pose.pt'),
-            sam_model=config.get('models', {}).get('sam_model', 'sam2.1_b.pt'),
-            padding_ratio=config.get('detection', {}).get('padding_ratio', 0.1),
-            device=config['performance']['device']
-        )
-        
-        field_detector = modules['FieldDetector'](
-            model_id=config['models']['field_detection_model_id'],
-            api_key=config['api_keys']['roboflow_api_key']
-        )
-        
-        # Initialize team classifier
-        team_classifier = modules['TeamClassifierModule'](
-            device=config['performance']['device'],
-            hf_token=config['api_keys']['huggingface_token'],
-            model_path=config['models']['siglip_model_path']
-        )
-        
-        # Initialize tracker
-        tracker = modules['ObjectTracker']()
-        
-        # Initialize possession detector if enabled
-        possession_detector = None
-        if config.get('possession_detection', {}).get('enable', True):
-            possession_detector = modules['PlayerPossessionDetector'](
-                proximity_threshold=config.get('possession_detection', {}).get('proximity_threshold', 250),
-                frame_proximity_threshold=config.get('possession_detection', {}).get('frame_proximity_threshold', 30),
-                coordinate_system=config.get('possession_detection', {}).get('coordinate_system', 'pitch'),
-                possession_frames=config.get('possession_detection', {}).get('possession_frames', 3),
-                possession_duration=config.get('possession_detection', {}).get('possession_duration', 3),
-                no_possession_frames=config.get('possession_detection', {}).get('no_possession_frames', 10)
-            )
-        
-        # Initialize frame processor
-        frame_processor = modules['FrameProcessor'](
-            player_detector=player_detector,
-            field_detector=field_detector,
-            team_classifier=team_classifier,
-            tracker=tracker,
-            config=config,
-            possession_detector=possession_detector
-        )
-        
-        # Initialize visualization components
-        annotator = modules['FootballAnnotator'](
-            config=config,
-            possession_detector=possession_detector
-        )
-        
-        pitch_renderer = modules['PitchRenderer'](config)
-        
-        return {
-            'player_detector': player_detector,
-            'field_detector': field_detector,
-            'team_classifier': team_classifier,
-            'tracker': tracker,
-            'possession_detector': possession_detector,
-            'frame_processor': frame_processor,
-            'annotator': annotator,
-            'pitch_renderer': pitch_renderer
-        }
-    except Exception as e:
-        st.error(f"Error initializing Football AI: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        return None
-
-def process_video(video_path, stframe, football_ai, ui_settings, save_output=False, output_file=None):
-    """Process video with Football AI."""
-    # Open video
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        st.error(f"Error: Could not open video {video_path}")
+# Extract the latest frame from an MP4 video using ffmpeg
+def extract_latest_frame(video_path, output_path):
+    """Extract the last frame from a video file using ffmpeg."""
+    if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
         return False
     
-    # Get video properties
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    # Create output video writer if requested
-    out = None
-    if save_output:
-        if not output_file:
-            output_file = "football_ai_output.mp4"
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out_width = width + 800  # Original + tactical view
-        out_height = max(height, 600)
-        out = cv2.VideoWriter(output_file, fourcc, fps, (out_width, out_height))
-    
-    # Create progress bar
-    progress_bar = st.progress(0)
-    
-    # Train team classifier if needed
-    with st.spinner('Training team classifier...'):
-        # Collect player crops
-        crops = []
-        sample_frames = min(30, total_frames)  # Limit number of frames for training
-        stride = max(1, total_frames // sample_frames)
-        
-        for i in range(0, total_frames, stride):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Detect players
-            detections = football_ai['player_detector'].detect_categories(frame)
-            try:
-                import supervision as sv
-                player_crops = [sv.crop_image(frame, xyxy) for xyxy in detections['players'].xyxy]
-                crops.extend(player_crops)
-            except Exception as e:
-                st.error(f"Error creating player crops: {e}")
-                continue
-        
-        # Train classifier
-        if crops:
-            football_ai['team_classifier'].train(crops)
-            st.toast('Team classifier trained successfully!')
-    
-    # Reset video to beginning
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-    
-    # Initialize processing variables
-    frame_count = 0
-    stop_requested = False
-    
-    # Main processing loop
-    while True:
-        # Check if stop button was clicked
-        if 'stop_processing' in st.session_state and st.session_state['stop_processing']:
-            stop_requested = True
-            break
-        
-        # Read frame
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        # Process frame
-        try:
-            results = football_ai['frame_processor'].process_frame(frame)
-            
-            # Unpack results
-            detections, transformer, poses, pose_stats, segmentations, seg_stats, sahi_stats, possession_result = results
-            
-            # Create visualizations
-            annotated_frame = football_ai['annotator'].annotate_frame_with_all_features(
-                frame, detections, poses, segmentations, possession_result
-            )
-            
-            # Render pitch view
-            pitch_view = football_ai['pitch_renderer'].render(
-                detections, transformer, football_ai['tracker'].ball_trail
-            )
-            
-            # Combine frames
-            out_height = max(height, 600)
-            out_width = width + 800
-            combined = np.zeros((out_height, out_width, 3), dtype=np.uint8)
-            
-            # Place frames
-            combined[:height, :width] = annotated_frame
-            resized_pitch = cv2.resize(pitch_view, (800, 600))
-            combined[:600, width:] = resized_pitch
-            
-            # Add labels
-            features = []
-            if ui_settings.get('show_pose', False):
-                features.append("Pose")
-            if ui_settings.get('show_segmentation', False):
-                features.append("Segmentation")
-            if ui_settings.get('enable_possession', False):
-                features.append("Player Possession")
-            if ui_settings.get('enable_sahi', False):
-                features.append("SAHI")
-            
-            features_str = " with " + ", ".join(features) if features else ""
-            cv2.putText(combined, f"Original{features_str}", (10, 30),
-                      cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            cv2.putText(combined, "Tactical View", (width + 10, 30),
-                      cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            
-            # Display frame
-            stframe.image(combined, channels="BGR")
-            
-            # Save frame if requested
-            if out is not None:
-                out.write(combined)
-            
-        except Exception as e:
-            st.error(f"Error processing frame {frame_count}: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-        
-        # Update progress
-        frame_count += 1
-        progress_percentage = min(100, int((frame_count / total_frames) * 100))
-        progress_bar.progress(progress_percentage)
-        
-        # Check if we need to slow down processing for realtime display
-        if ui_settings.get('realtime_processing', False):
-            import time
-            time.sleep(1/fps)
-    
-    # Clean up
-    cap.release()
-    if out is not None:
-        out.release()
-    
-    # Reset progress
-    progress_bar.empty()
-    
-    return not stop_requested
-
-
-def main():
-    st.title("Football AI - Advanced Tactical Analysis")
-    st.subheader("Computer Vision-based Football Analysis System")
-
-    # Initialize session state
-    if 'stop_processing' not in st.session_state:
-        st.session_state['stop_processing'] = False
-
-    # Import Football AI modules
-    football_ai_modules = import_football_ai_modules()
-    if not football_ai_modules.get('import_successful', False):
-        st.error("Failed to import required modules. Please check error messages and installation.")
-        st.code(football_ai_modules.get('error', 'Unknown error'))
-        
-        st.warning("""
-        ### Potential fixes:
-        
-        1. **NumPy Version Issue**: Try downgrading NumPy:
-           ```
-           pip install numpy==1.24.3
-           ```
-        
-        2. **ONNX Runtime Issue**: Try reinstalling ONNX:
-           ```
-           pip uninstall -y onnxruntime onnxruntime-gpu
-           pip install onnxruntime
-           ```
-        
-        3. **Dependency Issues**: Install missing packages:
-           ```
-           pip install 'inference[transformers]' 'inference[gaze]' 'inference[grounding-dino]'
-           ```
-        """)
-        return
-        
-    st.sidebar.title("Settings")
-    
-    # Load default config path
-    default_config_path = "config_temp.yaml"
-    if not os.path.exists(default_config_path):
-        default_config_path = st.sidebar.text_input("Enter path to config.yaml", value="config_temp.yaml")
-    
-    # Load configuration
-    config = load_config(default_config_path)
-    if not config:
-        st.error(f"Could not load configuration from {default_config_path}")
-        return
-    
-    # Video selection
-    st.sidebar.subheader("Video Input")
-    demo_selected = st.sidebar.radio(label="Video Source", options=["Upload Your Own", "Use Test Video"], horizontal=True)
-    
-    # File uploader
-    uploaded_video = None
-    video_path = None
-    
-    if demo_selected == "Upload Your Own":
-        uploaded_video = st.sidebar.file_uploader('Upload a video file', type=['mp4','mov', 'avi', 'm4v', 'asf'])
-        if uploaded_video:
-            # Save uploaded video to temp file
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            temp_file.write(uploaded_video.read())
-            video_path = temp_file.name
-            st.sidebar.video(video_path)
-    else:
-        # Use path to a local test video
-        video_path_input = st.sidebar.text_input("Path to test video", value=config['video']['input_path'])
-        if os.path.exists(video_path_input):
-            video_path = video_path_input
-            try:
-                st.sidebar.video(video_path)
-            except Exception as e:
-                st.sidebar.warning(f"Could not display video preview: {str(e)}")
-    
-    # Team settings
-    st.sidebar.subheader("Team Information")
-    team1_name = st.sidebar.text_input(label='First Team Name', value="Team 1")
-    team2_name = st.sidebar.text_input(label='Second Team Name', value="Team 2")
-    
-    # Create tabs for settings and visualization
-    tab1, tab2, tab3 = st.tabs(["How to Use", "Team Colors & Features", "Detection Settings"])
-    
-    with tab1:
-        st.header(':blue[Welcome to Football AI!]')
-        st.subheader('Key Features:', divider='blue')
-        st.markdown("""
-            1. **Player Detection & Tracking**: Identifies all players, goalkeepers, referees, and the ball
-            2. **Team Classification**: Automatically assigns players to their teams using AI
-            3. **Pose Estimation**: Detects player poses for advanced movement analysis
-            4. **Player Segmentation**: Creates precise player silhouettes for better visualization
-            5. **Possession Detection**: Identifies which player has possession of the ball
-            6. **Tactical Mapping**: Projects player positions onto a tactical pitch view
-            7. **Ball Tracking**: Tracks ball movement and visualizes its path
-        """)
-        
-        st.subheader('How to use:', divider='blue')
-        st.markdown("""
-            1. Upload your own video or specify the path to a test video
-            2. Enter team names for easier identification
-            3. Configure team colors in the "Team Colors & Features" tab
-            4. Adjust detection settings in the "Detection Settings" tab
-            5. Click "Start Processing" to begin analysis
-            6. View the results with both the original video and tactical map side by side
-            7. Save outputs for later review if needed
-        """)
-        
-        st.write("Version 1.0.0")
-    
-    with tab2:
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            # Team color selection
-            st.subheader("Team Colors")
-            team1_p_color = st.color_picker(f"{team1_name} Players", value="#00BFFF")  # Light blue
-            team1_gk_color = st.color_picker(f"{team1_name} Goalkeeper", value="#FFFF00")  # Yellow
-            team2_p_color = st.color_picker(f"{team2_name} Players", value="#FF1493")  # Deep pink
-            team2_gk_color = st.color_picker(f"{team2_name} Goalkeeper", value="#00FF00")  # Green
-            referee_color = st.color_picker("Referee", value="#FFFFFF")  # White
-            
-            # Store colors in session state
-            st.session_state['team1_p_color'] = team1_p_color
-            st.session_state['team1_gk_color'] = team1_gk_color
-            st.session_state['team2_p_color'] = team2_p_color
-            st.session_state['team2_gk_color'] = team2_gk_color
-            st.session_state['referee_color'] = referee_color
-        
-        with col2:
-            # Advanced features toggles
-            st.subheader("Advanced Features")
-            enable_pose = st.toggle("Enable Pose Estimation", value=True)
-            enable_segmentation = st.toggle("Enable Player Segmentation", value=True)
-            enable_possession = st.toggle("Enable Player Possession Detection", value=True)
-            enable_sahi = st.toggle("Enable SAHI (Small Object Detection)", value=False)
-            
-            # Store feature selections in session state
-            st.session_state['enable_pose'] = enable_pose
-            st.session_state['enable_segmentation'] = enable_segmentation
-            st.session_state['enable_possession'] = enable_possession
-            st.session_state['enable_sahi'] = enable_sahi
-            
-            # Visualization options
-            st.subheader("Visualization Options")
-            show_pose = st.checkbox("Show Pose Visualization", value=True) if enable_pose else False
-            show_segmentation = st.checkbox("Show Segmentation Visualization", value=True) if enable_segmentation else False
-            show_possession = st.checkbox("Show Possession Visualization", value=True) if enable_possession else False
-            show_ball_tracks = st.checkbox("Show Ball Tracks", value=True)
-            
-            # Store visualization options in session state
-            st.session_state['show_pose'] = show_pose
-            st.session_state['show_segmentation'] = show_segmentation
-            st.session_state['show_possession'] = show_possession
-            st.session_state['show_ball_tracks'] = show_ball_tracks
-    
-    with tab3:
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            # Detection settings
-            st.subheader("Detection Parameters")
-            player_model_conf_thresh = st.slider('Player Detection Confidence', min_value=0.0, max_value=1.0, value=0.5)
-            keypoints_model_conf_thresh = st.slider('Field Keypoints Confidence', min_value=0.0, max_value=1.0, value=0.5)
-            
-            # SAHI settings if enabled
-            if enable_sahi:
-                st.subheader("SAHI Settings")
-                sahi_slice_rows = st.slider('SAHI Slice Rows', min_value=1, max_value=4, value=2)
-                sahi_slice_cols = st.slider('SAHI Slice Columns', min_value=1, max_value=4, value=2)
-                sahi_overlap = st.slider('SAHI Overlap Ratio', min_value=0.0, max_value=0.5, value=0.2)
-            
-        with col2:
-            # Possession detection settings
-            if enable_possession:
-                st.subheader("Possession Detection")
-                proximity_threshold = st.slider('Proximity Threshold (pixels)', min_value=10, max_value=100, value=30)
-                possession_frames = st.slider('Required Possession Frames', min_value=1, max_value=10, value=3)
-                coordinate_system = st.radio("Coordinate System", ["frame", "pitch"], horizontal=True)
-            
-            # Output settings
-            st.subheader("Output Settings")
-            save_output = st.checkbox("Save Output Video", value=False)
-            output_filename = None
-            if save_output:
-                output_filename = st.text_input("Output Filename", value="football_ai_output.mp4")
-            
-            # Real-time processing toggle
-            realtime_processing = st.checkbox("Real-time Processing (slower but smoother)", value=False)
-    
-    # Process control buttons
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    processing_ready = video_path is not None
-    
-    with col1:
-        pass
-    
-    with col2:
-        if processing_ready:
-            start_button = st.button("Start Processing", disabled=not processing_ready)
-        else:
-            st.warning("Please provide a valid video file to process")
-            start_button = False
-            
-        if start_button:
-            st.session_state['stop_processing'] = False
-            
-            # Update config from UI settings
-            config['detection']['confidence_threshold'] = player_model_conf_thresh
-            config['detection']['keypoint_confidence_threshold'] = keypoints_model_conf_thresh
-            config['display']['show_pose'] = show_pose if 'show_pose' in locals() else False
-            config['display']['show_segmentation'] = show_segmentation if 'show_segmentation' in locals() else False
-            config['display']['show_possession_detection'] = show_possession if 'show_possession' in locals() else False
-            config['display']['show_ball'] = show_ball_tracks if 'show_ball_tracks' in locals() else True
-            config['display']['team_colors']['team_1'] = team1_p_color
-            config['display']['team_colors']['team_2'] = team2_p_color
-            
-            # Update SAHI settings
-            config['sahi']['enable'] = enable_sahi
-            if enable_sahi and 'sahi_slice_rows' in locals():
-                config['sahi']['slice_rows'] = sahi_slice_rows
-                config['sahi']['slice_cols'] = sahi_slice_cols
-                config['sahi']['overlap_ratio'] = sahi_overlap
-            
-            # Update possession settings
-            config['possession_detection']['enable'] = enable_possession
-            if enable_possession and 'proximity_threshold' in locals():
-                if coordinate_system == "frame":
-                    config['possession_detection']['frame_proximity_threshold'] = proximity_threshold
-                else:
-                    config['possession_detection']['proximity_threshold'] = proximity_threshold
-                config['possession_detection']['possession_frames'] = possession_frames
-                config['possession_detection']['coordinate_system'] = coordinate_system
-            
-            # Initialize Football AI components
-            football_ai = initialize_football_ai(config, football_ai_modules)
-            
-            if football_ai:
-                # Create a placeholder for the video display
-                stframe = st.empty()
-                
-                # Process the video
-                ui_settings = {
-                    'show_pose': show_pose if 'show_pose' in locals() else False,
-                    'show_segmentation': show_segmentation if 'show_segmentation' in locals() else False,
-                    'enable_possession': enable_possession,
-                    'show_possession': show_possession if 'show_possession' in locals() else False,
-                    'enable_sahi': enable_sahi,
-                    'show_ball_tracks': show_ball_tracks if 'show_ball_tracks' in locals() else True,
-                    'realtime_processing': realtime_processing
-                }
-                
-                completed = process_video(
-                    video_path=video_path,
-                    stframe=stframe,
-                    football_ai=football_ai,
-                    ui_settings=ui_settings,
-                    save_output=save_output,
-                    output_file=output_filename if save_output else None
-                )
-                
-                if completed:
-                    st.success("Processing completed!")
-                else:
-                    st.warning("Processing stopped by user.")
-            else:
-                st.error("Failed to initialize Football AI components.")
-    
-    with col3:
-        if 'stop_processing' in st.session_state and not st.session_state['stop_processing'] and processing_ready:
-            stop_button = st.button("Stop Processing")
-            if stop_button:
-                st.session_state['stop_processing'] = True
-    
-    # Display visualization area
-    st.markdown("---")
-    stframe = st.empty()
-
-
-if __name__ == "__main__":
     try:
-        main()
-    except SystemExit:
-        pass
+        # Use ffmpeg to extract the latest frame
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-i", video_path,  # Input file
+            "-vf", "select=gte(n\\,0)",  # Select frames from the end
+            "-vframes", "1",  # Extract just one frame
+            "-y",  # Overwrite output file if exists
+            output_path  # Output file
+        ]
+        
+        # Run ffmpeg command
+        result = subprocess.run(
+            ffmpeg_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception as e:
+        st.error(f"Error extracting frame: {e}")
+        return False
+
+# Video selection section
+st.header("1. Select Video")
+source_tab1, source_tab2 = st.tabs(["Upload Video", "Use Existing Video"])
+
+# Initialize video path
+video_path = None
+
+with source_tab1:
+    uploaded_file = st.file_uploader("Upload a video file", type=['mp4', 'mov', 'avi'])
+    if uploaded_file:
+        # Save uploaded file to temp location
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+        temp_file.write(uploaded_file.read())
+        video_path = temp_file.name
+        st.success(f"Video uploaded successfully")
+
+with source_tab2:
+    video_dir = "videos"
+    if os.path.exists(video_dir):
+        video_files = [f for f in os.listdir(video_dir) if f.endswith(('.mp4', '.mov', '.avi'))]
+        if video_files:
+            selected_video = st.selectbox("Select a video from videos directory", video_files)
+            video_path = os.path.join(video_dir, selected_video)
+            st.success(f"Selected video: {video_path}")
+        else:
+            st.warning(f"No video files found in {video_dir} directory")
+    else:
+        st.warning(f"Directory {video_dir} does not exist")
+
+# Select config file
+st.header("2. Processing Configuration")
+config_files = ["config.yaml", "config_temp.yaml"]
+available_configs = [f for f in config_files if os.path.exists(f)]
+
+if available_configs:
+    config_path = st.selectbox("Select config file", available_configs)
+    st.success(f"Using config: {config_path}")
+else:
+    st.error("No config files found. Please create config.yaml or config_temp.yaml")
+    config_path = None
+
+# Create output directory if not exists
+output_dir = "output"
+os.makedirs(output_dir, exist_ok=True)
+temp_dir = os.path.join(output_dir, "temp")
+os.makedirs(temp_dir, exist_ok=True)
+
+# State management
+if "process" not in st.session_state:
+    st.session_state.process = None
+if "log_file" not in st.session_state:
+    st.session_state.log_file = None
+if "output_file" not in st.session_state:
+    st.session_state.output_file = None
+if "original_video" not in st.session_state:
+    st.session_state.original_video = None
+if "last_frame_time" not in st.session_state:
+    st.session_state.last_frame_time = 0
+
+# Create a frame thumbnail
+frame_path = os.path.join(temp_dir, "latest_frame.jpg")
+
+# Video display section
+st.header("3. Live Frame View")
+
+# Create frame display containers
+frame_display = st.empty()
+frame_info = st.empty()
+
+# Display original video for reference
+if video_path and os.path.exists(video_path):
+    st.header("Original Video")
+    st.video(video_path)
+
+# Runner section
+st.header("4. Run Processing")
+
+col1, col2 = st.columns(2)
+
+# Create placeholders for output and status
+log_placeholder = st.empty()
+status_placeholder = st.empty()
+
+# Start button
+with col1:
+    start_disabled = video_path is None or config_path is None or st.session_state.process is not None
+    start_button = st.button("Start Processing", disabled=start_disabled)
+    if start_button and video_path and config_path:
+        # Update config file with new video path
+        if update_config_video_path(config_path, video_path):
+            st.success(f"Updated config to use selected video: {video_path}")
+        else:
+            st.error("Failed to update config file. Processing may use incorrect video.")
+        
+        # Create output filename
+        output_basename = os.path.basename(video_path)
+        output_filename = f"processed_{int(time.time())}_{output_basename}"
+        output_path = os.path.join(output_dir, output_filename)
+        st.session_state.output_file = output_path
+        st.session_state.original_video = video_path
+        
+        # Create log file
+        log_file = tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.log')
+        log_file.close()
+        st.session_state.log_file = log_file.name
+        
+        # Build command
+        cmd = [
+            sys.executable,  # Current Python interpreter
+            "main.py",
+            "--config", config_path,
+            "--output", output_path
+        ]
+        
+        # Parse environment variables
+        custom_env = dict(os.environ)
+        custom_env["PYTHONMALLOC"] = "malloc"  # Add this to help prevent segfaults
+        
+        # Start subprocess
+        try:
+            with open(st.session_state.log_file, 'w') as f:
+                st.session_state.process = subprocess.Popen(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    env=custom_env
+                )
+            st.success(f"Started processing with PID: {st.session_state.process.pid}")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to start process: {e}")
+            st.session_state.process = None
+
+# Stop button
+with col2:
+    stop_button = st.button("Stop Processing", disabled=st.session_state.process is None)
+    if stop_button and st.session_state.process is not None:
+        try:
+            st.session_state.process.terminate()
+            time.sleep(2)  # Give it time to terminate gracefully
+            if st.session_state.process.poll() is None:  # If still running
+                st.session_state.process.kill()  # Force kill
+            st.warning("Process stopped by user")
+        except Exception as e:
+            st.error(f"Error stopping process: {e}")
+        finally:
+            st.session_state.process = None
+            st.rerun()
+
+# Display process status
+if st.session_state.process is not None:
+    # Check if process is still running
+    if st.session_state.process.poll() is None:
+        status_placeholder.info("⏳ Processing is running...")
+        
+        # Check if processed video exists and extract current frame
+        if st.session_state.output_file and os.path.exists(st.session_state.output_file):
+            # Only try to extract a frame every 2 seconds to avoid too many ffmpeg calls
+            current_time = time.time()
+            if current_time - st.session_state.last_frame_time > 2:
+                # Extract the latest frame
+                if extract_latest_frame(st.session_state.output_file, frame_path):
+                    try:
+                        # Display the frame
+                        img = Image.open(frame_path)
+                        frame_display.image(img, caption="Latest processed frame", use_column_width=True)
+                        frame_info.success("✅ Showing latest processed frame")
+                        # Update last frame time
+                        st.session_state.last_frame_time = current_time
+                    except Exception as e:
+                        frame_info.error(f"Error displaying frame: {e}")
+                else:
+                    frame_info.warning("Waiting for processed frames...")
+        
+        # Read and display log
+        if st.session_state.log_file and os.path.exists(st.session_state.log_file):
+            try:
+                with open(st.session_state.log_file, 'r') as f:
+                    log_content = f.read()
+                
+                # Show only the last 30 lines to avoid overwhelming the UI
+                lines = log_content.split('\n')
+                last_lines = lines[-30:]
+                
+                log_placeholder.text_area("Log Output (last 30 lines)", 
+                                        "\n".join(last_lines), 
+                                        height=400)
+                
+                # Show progress if visible
+                for line in reversed(lines):
+                    if "Processing frames:" in line and "%" in line:
+                        status_placeholder.success(line)
+                        break
+            except Exception as e:
+                log_placeholder.error(f"Error reading log: {e}")
+        
+        # Refresh every 2 seconds
+        time.sleep(2)
+        st.rerun()
+    else:
+        # Process has ended
+        exit_code = st.session_state.process.poll()
+        if exit_code == 0:
+            status_placeholder.success(f"✅ Processing completed successfully!")
+        else:
+            status_placeholder.error(f"❌ Processing failed with exit code: {exit_code}")
+        
+        # Display full log
+        if st.session_state.log_file and os.path.exists(st.session_state.log_file):
+            try:
+                with open(st.session_state.log_file, 'r') as f:
+                    log_content = f.read()
+                log_placeholder.text_area("Complete Log", log_content, height=400)
+            except Exception as e:
+                log_placeholder.error(f"Error reading log: {e}")
+        
+        # Show the final frame
+        if st.session_state.output_file and os.path.exists(st.session_state.output_file):
+            if extract_latest_frame(st.session_state.output_file, frame_path):
+                try:
+                    img = Image.open(frame_path)
+                    frame_display.image(img, caption="Final processed frame", use_column_width=True)
+                    frame_info.success("✅ Processing complete - showing final frame")
+                except Exception as e:
+                    frame_info.error(f"Error displaying final frame: {e}")
+        
+        # Show the completed video
+        if st.session_state.output_file and os.path.exists(st.session_state.output_file):
+            st.header("Completed Processed Video")
+            st.video(st.session_state.output_file)
+        
+        # Clear process state
+        st.session_state.process = None
+
+# List all processed videos
+st.header("5. All Processed Videos")
+if os.path.exists(output_dir):
+    processed_videos = [f for f in os.listdir(output_dir) 
+                       if f.endswith(('.mp4', '.mov', '.avi')) and os.path.isfile(os.path.join(output_dir, f))]
+    
+    if processed_videos:
+        # Sort by modification time (newest first)
+        processed_videos.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
+        
+        selected_video = st.selectbox("Select processed video", processed_videos)
+        if selected_video:
+            st.video(os.path.join(output_dir, selected_video))
+    else:
+        st.info("No processed videos found")
