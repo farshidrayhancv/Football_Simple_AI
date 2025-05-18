@@ -6,7 +6,7 @@ annotatations/*
 *.jpg
 *.mp4
 __pycache__
-
 config.yaml
+
 *.pt
 
