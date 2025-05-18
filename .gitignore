@@ -7,6 +7,6 @@ annotatations/*
 *.mp4
 __pycache__
 
-config_temp.yaml
+config.yaml
 *.pt
 
