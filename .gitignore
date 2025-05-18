@@ -1,6 +1,8 @@
 videos/*
 caching/*
 .cache/
+annotatations/*
+*.json
 
 *.mp4
 __pycache__
